@@ -3,9 +3,9 @@
  * Communicates with the backend server to fetch AI-generated words
  */
 
-import type { GameWordsResponse, WordCardModel } from '@constellations/shared';
+import type { GameWordsResponse } from '@constellations/shared';
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
 
 interface FetchWordsOptions {
   theme?: string;
@@ -16,11 +16,11 @@ interface FetchWordsOptions {
 /**
  * Fetch game words from the backend
  * Always returns 5 words
- * Falls back to default words if the request fails
+ * Throws if the backend cannot provide words
  */
 export async function fetchGameWords(
   options: FetchWordsOptions = {},
-): Promise<WordCardModel[]> {
+): Promise<GameWordsResponse> {
   const { theme = 'constellation', retries = 1, timeoutMs = 10000 } = options;
 
   const params = new URLSearchParams({
@@ -49,7 +49,7 @@ export async function fetchGameWords(
       }
 
       const data: GameWordsResponse = await response.json();
-      return data.words;
+      return data;
     } catch (error) {
       const isLastAttempt = attempt === retries;
       const errorMessage =
@@ -62,14 +62,7 @@ export async function fetchGameWords(
       );
 
       if (isLastAttempt) {
-        console.error('All retries exhausted, using default words');
-        return [
-          { id: 'card-0', word: 'star' },
-          { id: 'card-1', word: 'moon' },
-          { id: 'card-2', word: 'orbit' },
-          { id: 'card-3', word: 'nova' },
-          { id: 'card-4', word: 'comet' },
-        ];
+        throw error;
       }
 
       // Wait before retrying (exponential backoff)
@@ -79,11 +72,5 @@ export async function fetchGameWords(
     }
   }
 
-  return [
-    { id: 'card-0', word: 'star' },
-    { id: 'card-1', word: 'moon' },
-    { id: 'card-2', word: 'orbit' },
-    { id: 'card-3', word: 'nova' },
-    { id: 'card-4', word: 'comet' },
-  ];
+  throw new Error('Unable to fetch game words');
 }

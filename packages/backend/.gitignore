@@ -2,6 +2,8 @@
 packages/backend/.env
 packages/backend/node_modules
 packages/backend/dist
+packages/backend/data
+data
 
 # Shared
 packages/shared/node_modules

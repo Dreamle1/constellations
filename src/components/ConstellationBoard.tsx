@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   LayoutChangeEvent,
   StyleSheet,
@@ -9,13 +9,12 @@ import {
 import Animated from 'react-native-reanimated';
 
 import {
-  CORRECT_PLAY_ORDER,
-  INITIAL_FIELD_CARD_IDS,
   MAX_SUBMIT_TRIES,
   TOAST_DURATION_MS,
 } from '@/constants/game';
 import type { DragState, LayoutRect, WordCardModel, Zone } from '@/types/cards';
 import { useDragSession } from '@/hooks/useDragSession';
+import { fetchGameWords } from '@/utils/gameWordsApi';
 import { getPlayInsertionIndex, pointInRect } from '@utils/dragGeometry';
 import { mergeIntoFieldOrder, playOrderMatches } from '@utils/fieldOrder';
 
@@ -26,16 +25,7 @@ import { WordCard } from './WordCard';
 import { DraggableWordCard } from './DraggableWordCard';
 import { PlayAreaCardSlot } from './PlayAreaCardSlot';
 
-const SAMPLE_WORDS = ['star', 'moon', 'orbit', 'nova', 'comet'];
-
 type GamePhase = 'playing' | 'success' | 'failed';
-
-function createInitialCards(): WordCardModel[] {
-  return SAMPLE_WORDS.map((word, index) => ({
-    id: `card-${index}`,
-    word,
-  }));
-}
 
 function measureViewInWindow(
   view: RNView | null,
@@ -50,15 +40,20 @@ function measureViewInWindow(
 }
 
 export const ConstellationBoard: React.FC = () => {
+  const [cards, setCards] = useState<WordCardModel[]>([]);
+  const [answerKey, setAnswerKey] = useState<string[]>([]);
+  const [loadingWords, setLoadingWords] = useState(true);
+  const [wordLoadError, setWordLoadError] = useState<string | null>(null);
+
   const cardsById = useMemo(() => {
     const map = new Map<string, WordCardModel>();
-    createInitialCards().forEach((card) => map.set(card.id, card));
+    cards.forEach((card) => map.set(card.id, card));
     return map;
-  }, []);
+  }, [cards]);
 
   const allCardIds = useMemo(() => Array.from(cardsById.keys()), [cardsById]);
 
-  const [fieldIds, setFieldIds] = useState<string[]>(() => [...INITIAL_FIELD_CARD_IDS]);
+  const [fieldIds, setFieldIds] = useState<string[]>([]);
   const [playIds, setPlayIds] = useState<string[]>([]);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [dropPreviewIndex, setDropPreviewIndex] = useState<number | null>(null);
@@ -77,7 +72,51 @@ export const ConstellationBoard: React.FC = () => {
 
   const dragSession = useDragSession(containerRef);
   const draggingCardId = dragState?.cardId ?? null;
-  const interactionsLocked = gamePhase !== 'playing';
+  const interactionsLocked =
+    gamePhase !== 'playing' || loadingWords || !!wordLoadError || answerKey.length === 0;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadWords() {
+      setLoadingWords(true);
+      setWordLoadError(null);
+
+      try {
+        const response = await fetchGameWords({ theme: 'constellation' });
+
+        if (cancelled) {
+          return;
+        }
+
+        setCards(response.words);
+        setAnswerKey(response.answerKey);
+        setFieldIds(response.words.map((card) => card.id));
+        setPlayIds([]);
+        setGamePhase('playing');
+        setSubmitTries(0);
+        playItemLayouts.current.clear();
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        const message =
+          error instanceof Error ? error.message : 'Unable to load words';
+        setWordLoadError(message);
+      } finally {
+        if (!cancelled) {
+          setLoadingWords(false);
+        }
+      }
+    }
+
+    loadWords();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const refreshFieldLayout = useCallback(() => {
     measureViewInWindow(fieldRef.current, (rect) => {
@@ -119,17 +158,15 @@ export const ConstellationBoard: React.FC = () => {
 
   const resetGame = useCallback(() => {
     clearDrag();
-    setFieldIds([...INITIAL_FIELD_CARD_IDS]);
+    setFieldIds(cards.map((card) => card.id));
     setPlayIds([]);
-    setGamePhase('playing');
-    setSubmitTries(0);
     setToastMessage(null);
     playItemLayouts.current.clear();
     requestAnimationFrame(() => {
       refreshFieldLayout();
       refreshPlayLayout();
     });
-  }, [clearDrag, refreshFieldLayout, refreshPlayLayout]);
+  }, [cards, clearDrag, refreshFieldLayout, refreshPlayLayout]);
 
   const showToast = useCallback((message: string) => {
     setToastMessage(message);
@@ -140,14 +177,14 @@ export const ConstellationBoard: React.FC = () => {
       return;
     }
 
-    const allInPlay = playIds.length === allCardIds.length;
+    const allInPlay = playIds.length === answerKey.length;
 
     if (!allInPlay) {
       showToast('All cards must be in play.');
       return;
     }
 
-    if (playOrderMatches(playIds, CORRECT_PLAY_ORDER)) {
+    if (playOrderMatches(playIds, answerKey)) {
       setGamePhase('success');
       return;
     }
@@ -158,7 +195,7 @@ export const ConstellationBoard: React.FC = () => {
     if (nextTries >= MAX_SUBMIT_TRIES) {
       setGamePhase('failed');
     }
-  }, [allCardIds.length, interactionsLocked, playIds, showToast, submitTries]);
+  }, [answerKey, interactionsLocked, playIds, showToast, submitTries]);
 
   const updateDropPreview = useCallback(
     (x: number, y: number) => {
@@ -246,7 +283,7 @@ export const ConstellationBoard: React.FC = () => {
         } else {
           setPlayIds((prev) => prev.filter((id) => id !== cardId));
           setFieldIds((prev) =>
-            mergeIntoFieldOrder(prev, cardId, INITIAL_FIELD_CARD_IDS),
+            mergeIntoFieldOrder(prev, cardId, allCardIds),
           );
         }
         clearDrag();
@@ -301,6 +338,7 @@ export const ConstellationBoard: React.FC = () => {
     },
     [
       clearDrag,
+      allCardIds,
       interactionsLocked,
       playIds,
       refreshFieldLayout,
@@ -352,6 +390,16 @@ export const ConstellationBoard: React.FC = () => {
   return (
     <View ref={containerRef} style={styles.container}>
       <View style={styles.board}>
+        {loadingWords && (
+          <View style={styles.statusPanel}>
+            <Text style={styles.statusText}>Loading words...</Text>
+          </View>
+        )}
+        {wordLoadError && (
+          <View style={styles.statusPanel}>
+            <Text style={styles.statusText}>Unable to load words.</Text>
+          </View>
+        )}
         <View
           ref={fieldRef}
           style={[
@@ -540,6 +588,19 @@ const styles = StyleSheet.create({
   },
   sectionLocked: {
     opacity: 0.92,
+  },
+  statusPanel: {
+    alignItems: 'center',
+    backgroundColor: '#f8f9fc',
+    borderColor: '#dfe3f0',
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 14,
+  },
+  statusText: {
+    color: '#666',
+    fontSize: 14,
+    fontWeight: '600',
   },
   triesLabel: {
     color: '#666',
