@@ -64,6 +64,8 @@ assets/                  # Images, fonts, etc.
 - `npm run android` - Run on Android
 - `npm run ios` - Run on iOS
 - `npm run web` - Run on web
+- `npm run dev:all` - Run frontend and backend concurrently
+- `npm run backend:dev` - Run backend server only
 - `npm run type-check` - Check TypeScript types
 - `npm run lint` - Run ESLint
 - `npm run format` - Format with Prettier

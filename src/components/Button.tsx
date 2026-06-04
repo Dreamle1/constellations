@@ -5,13 +5,20 @@ interface ButtonProps {
   title: string;
   onPress?: () => void;
   disabled?: boolean;
+  variant?: 'primary' | 'secondary';
 }
 
-export const Button: React.FC<ButtonProps> = ({ title, onPress, disabled }) => {
+export const Button: React.FC<ButtonProps> = ({
+  title,
+  onPress,
+  disabled,
+  variant = 'primary',
+}) => {
   return (
     <Pressable
       style={({ pressed }) => [
         styles.container,
+        variant === 'secondary' ? styles.secondary : styles.primary,
         pressed && styles.pressed,
         disabled && styles.disabled,
       ]}
@@ -19,28 +26,48 @@ export const Button: React.FC<ButtonProps> = ({ title, onPress, disabled }) => {
       disabled={disabled}
       accessibilityRole="button"
     >
-      <Text style={styles.text}>{title}</Text>
+      <Text
+        style={[
+          styles.text,
+          variant === 'primary' ? styles.textPrimary : styles.textSecondary,
+        ]}
+      >
+        {title}
+      </Text>
     </Pressable>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
+    alignItems: 'center',
+    borderRadius: 8,
+    flex: 1,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#007AFF',
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  pressed: {
-    opacity: 0.85,
   },
   disabled: {
     opacity: 0.5,
   },
+  pressed: {
+    opacity: 0.85,
+  },
+  primary: {
+    backgroundColor: '#5c6bc0',
+  },
+  secondary: {
+    backgroundColor: '#eceff1',
+    borderColor: '#cfd8dc',
+    borderWidth: 1,
+  },
   text: {
-    color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  textPrimary: {
+    color: '#ffffff',
+  },
+  textSecondary: {
+    color: '#1a1a2e',
   },
 });

@@ -17,6 +17,7 @@ module.exports = function (api) {
           },
         },
       ],
+      // Reanimated / worklets plugins are added automatically by babel-preset-expo (must stay last).
     ],
   };
 };

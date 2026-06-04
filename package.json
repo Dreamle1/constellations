@@ -1,7 +1,11 @@
 {
   "name": "constellations",
   "version": "1.0.0",
-  "description": "React Native app with TypeScript",
+  "description": "React Native app with TypeScript and Node.js backend",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start",
@@ -10,8 +14,11 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
+    "backend:dev": "cd packages/backend && npm run dev",
+    "backend:build": "cd packages/backend && npm run build",
+    "dev:all": "concurrently \"npm run dev\" \"npm run backend:dev\"",
     "test": "jest",
-    "type-check": "tsc --noEmit",
+    "type-check": "tsc --noEmit && cd packages/backend && npm run type-check && cd ../shared && npm run type-check",
     "lint": "eslint . --ext .ts,.tsx",
     "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,json,md}\"",
@@ -27,9 +34,12 @@
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
+    "react-native-gesture-handler": "~2.28.0",
+    "react-native-reanimated": "~4.1.1",
     "react-native-safe-area-context": "~5.6.0",
     "react-native-screens": "~4.16.0",
-    "react-native-web": "^0.21.0"
+    "react-native-web": "^0.21.0",
+    "react-native-worklets": "0.5.1"
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",
@@ -42,6 +52,7 @@
     "@typescript-eslint/parser": "^7.18.0",
     "babel-plugin-module-resolver": "^5.0.2",
     "babel-preset-expo": "~54.0.0",
+    "concurrently": "^8.2.2",
     "eslint": "^8.57.0",
     "eslint-plugin-react": "^7.35.0",
     "eslint-plugin-react-native": "^4.1.0",

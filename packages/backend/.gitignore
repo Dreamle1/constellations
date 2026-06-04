@@ -1,0 +1,8 @@
+# Backend
+packages/backend/.env
+packages/backend/node_modules
+packages/backend/dist
+
+# Shared
+packages/shared/node_modules
+packages/shared/dist
