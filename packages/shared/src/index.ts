@@ -7,5 +7,4 @@ export interface GameWordsResponse {
   words: WordCardModel[];
   answer: string[];
   answerKey: string[];
-  theme: string;
 }

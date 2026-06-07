@@ -10,7 +10,6 @@ export interface GeneratedWordsResponse {
   words: WordItem[];
   answer: string[];
   answerKey: string[];
-  theme: string;
   api?: {
     request?: ApiRequestInfo;
     generation: GenerationInfo;
@@ -84,15 +83,15 @@ const API_KEY_PLACEHOLDERS = new Set([
   'sk-your_openai_api_key_here',
 ]);
 
-const FALLBACK_WORDS_BY_THEME: Record<string, string[]> = {
-  constellation: ['star', 'moon', 'orbit', 'nova', 'comet'],
-  space: ['nebula', 'galaxy', 'meteor', 'eclipse', 'quasar'],
-  ocean: ['coral', 'tide', 'reef', 'current', 'lagoon'],
-  forest: ['moss', 'fern', 'cedar', 'acorn', 'canopy'],
-  fantasy: ['dragon', 'rune', 'quest', 'charm', 'castle'],
-  music: ['melody', 'rhythm', 'chorus', 'tempo', 'harmony'],
-  sports: ['rally', 'sprint', 'goal', 'match', 'score'],
-};
+const FALLBACK_WORD_CHAINS: string[][] = [
+  ['spark', 'flame', 'candle', 'wax', 'seal'],
+  ['seed', 'plant', 'garden', 'fence', 'gate'],
+  ['thread', 'needle', 'fabric', 'curtain', 'window'],
+  ['key', 'lock', 'door', 'room', 'echo'],
+  ['rain', 'umbrella', 'handle', 'lever', 'machine'],
+  ['paper', 'letter', 'mailbox', 'street', 'map'],
+  ['brush', 'paint', 'canvas', 'frame', 'wall'],
+];
 
 const DISPLAY_ORDER = [2, 0, 4, 1, 3] as const;
 
@@ -118,8 +117,7 @@ export class WordGenerationService {
     this.apiKey = apiKey;
   }
 
-  async generateWords(theme: string): Promise<GeneratedWordsResponse> {
-    const normalizedTheme = theme.trim() || 'constellation';
+  async generateWords(): Promise<GeneratedWordsResponse> {
     const currentPacificDate = this.getPacificDateKey();
     const cachedWords = await this.dailyWordStore.getCurrent(currentPacificDate);
 
@@ -128,7 +126,6 @@ export class WordGenerationService {
         words: cachedWords.words,
         answer: cachedWords.answer,
         answerKey: cachedWords.answerKey,
-        theme: cachedWords.theme,
         api: {
           generation: {
             provider: 'local',
@@ -140,7 +137,7 @@ export class WordGenerationService {
     }
 
     if (!this.apiKey) {
-      const response = this.createFallbackResponse(normalizedTheme, {
+      const response = this.createFallbackResponse({
         provider: 'local',
         source: 'fallback',
         durationMs: 0,
@@ -196,7 +193,7 @@ export class WordGenerationService {
         console.warn(
           `Expected ${WORD_COUNT} words but got ${wordStrings.length}. Using fallback words. Response: ${text}`,
         );
-        const fallbackResponse = this.createFallbackResponse(normalizedTheme, {
+        const fallbackResponse = this.createFallbackResponse({
           ...baseGenerationInfo,
           source: 'fallback',
           durationMs: Date.now() - startedAt,
@@ -208,7 +205,6 @@ export class WordGenerationService {
 
       const generatedResponse: GeneratedWordsResponse = {
         ...this.toGameWords(wordStrings),
-        theme: normalizedTheme,
         api: {
           generation: {
             ...baseGenerationInfo,
@@ -240,7 +236,7 @@ export class WordGenerationService {
         }
       }
 
-      const fallbackResponse = this.createFallbackResponse(normalizedTheme, {
+      const fallbackResponse = this.createFallbackResponse({
         ...baseGenerationInfo,
         source: 'fallback',
         durationMs: Date.now() - startedAt,
@@ -276,7 +272,6 @@ export class WordGenerationService {
   ): Promise<void> {
     await this.dailyWordStore.save({
       date,
-      theme: response.theme,
       words: response.words,
       answer: response.answer,
       answerKey: response.answerKey,
@@ -444,31 +439,18 @@ export class WordGenerationService {
     return Array.from(new Set(normalizedWords)).slice(0, WORD_COUNT);
   }
 
-  private createFallbackResponse(
-    theme: string,
-    generation: GenerationInfo,
-  ): GeneratedWordsResponse {
+  private createFallbackResponse(generation: GenerationInfo): GeneratedWordsResponse {
     return {
-      ...this.toGameWords(this.getFallbackWords(theme)),
-      theme,
+      ...this.toGameWords(this.getFallbackWords()),
       api: {
         generation,
       },
     };
   }
 
-  private getFallbackWords(theme: string): string[] {
-    const normalizedTheme = theme.toLowerCase();
-    const matchingTheme = Object.keys(FALLBACK_WORDS_BY_THEME).find((key) =>
-      normalizedTheme.includes(key),
-    );
-
-    if (matchingTheme) {
-      return FALLBACK_WORDS_BY_THEME[matchingTheme];
-    }
-
-    const themeWord = normalizedTheme.replace(/[^a-z'-]/g, '').slice(0, 18);
-    return [themeWord || 'spark', 'story', 'mystery', 'wonder', 'quest'];
+  private getFallbackWords(): string[] {
+    const randomIndex = Math.floor(Math.random() * FALLBACK_WORD_CHAINS.length);
+    return FALLBACK_WORD_CHAINS[randomIndex];
   }
 
   private toWordItems(wordStrings: string[]): WordItem[] {

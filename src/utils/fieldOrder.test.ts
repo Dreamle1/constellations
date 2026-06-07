@@ -24,7 +24,11 @@ describe('playOrderMatches', () => {
     expect(playOrderMatches(['a', 'b'], ['a', 'b'])).toBe(true);
   });
 
+  it('returns true when order matches in reverse', () => {
+    expect(playOrderMatches(['b', 'a'], ['a', 'b'])).toBe(true);
+  });
+
   it('returns false when order differs', () => {
-    expect(playOrderMatches(['b', 'a'], ['a', 'b'])).toBe(false);
+    expect(playOrderMatches(['b', 'c', 'a'], ['a', 'b', 'c'])).toBe(false);
   });
 });

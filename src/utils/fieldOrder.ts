@@ -21,5 +21,9 @@ export function playOrderMatches(
   if (playIds.length !== correctOrder.length) {
     return false;
   }
-  return playIds.every((id, index) => id === correctOrder[index]);
+  const matchesForward = playIds.every((id, index) => id === correctOrder[index]);
+  const matchesReverse = playIds.every(
+    (id, index) => id === correctOrder[correctOrder.length - index - 1],
+  );
+  return matchesForward || matchesReverse;
 }

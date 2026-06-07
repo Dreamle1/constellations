@@ -53,18 +53,21 @@ Response: `{ "status": "ok" }`
 
 ### Generate Game Words
 ```
-GET /api/game/words?count=5&theme=constellation
+GET /api/game/words
 ```
-
-**Query Parameters:**
-- `count` (optional, default: 5): Number of words to generate (max: 20)
-- `theme` (optional, default: "constellation"): Theme for word generation
 
 **Response:**
 ```json
 {
-  "words": ["star", "moon", "orbit", "nova", "comet"],
-  "theme": "constellation"
+  "words": [
+    { "id": "card-2", "word": "candle" },
+    { "id": "card-0", "word": "spark" },
+    { "id": "card-4", "word": "seal" },
+    { "id": "card-1", "word": "flame" },
+    { "id": "card-3", "word": "wax" }
+  ],
+  "answer": ["spark", "flame", "candle", "wax", "seal"],
+  "answerKey": ["card-0", "card-1", "card-2", "card-3", "card-4"]
 }
 ```
 

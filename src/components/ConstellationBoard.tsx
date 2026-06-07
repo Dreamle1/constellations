@@ -12,9 +12,19 @@ import {
   MAX_SUBMIT_TRIES,
   TOAST_DURATION_MS,
 } from '@/constants/game';
-import type { DragState, LayoutRect, WordCardModel, Zone } from '@/types/cards';
+import type {
+  DragState,
+  GamePhase,
+  LayoutRect,
+  WordCardModel,
+  Zone,
+} from '@/types/cards';
 import { useDragSession } from '@/hooks/useDragSession';
 import { fetchGameWords } from '@/utils/gameWordsApi';
+import {
+  readCachedGameState,
+  writeCachedGameState,
+} from '@/utils/gameStateCache';
 import { getPlayInsertionIndex, pointInRect } from '@utils/dragGeometry';
 import { mergeIntoFieldOrder, playOrderMatches } from '@utils/fieldOrder';
 
@@ -24,8 +34,6 @@ import { GameToast } from './GameToast';
 import { WordCard } from './WordCard';
 import { DraggableWordCard } from './DraggableWordCard';
 import { PlayAreaCardSlot } from './PlayAreaCardSlot';
-
-type GamePhase = 'playing' | 'success' | 'failed';
 
 function measureViewInWindow(
   view: RNView | null,
@@ -66,6 +74,7 @@ export const ConstellationBoard: React.FC = () => {
   const fieldRef = useRef<RNView>(null);
   const playAreaRef = useRef<RNView>(null);
   const dragStateRef = useRef<DragState | null>(null);
+  const cacheReadyRef = useRef(false);
   const fieldLayout = useRef<LayoutRect | null>(null);
   const playLayout = useRef<LayoutRect | null>(null);
   const playItemLayouts = useRef<Map<string, LayoutRect>>(new Map());
@@ -83,7 +92,24 @@ export const ConstellationBoard: React.FC = () => {
       setWordLoadError(null);
 
       try {
-        const response = await fetchGameWords({ theme: 'constellation' });
+        const cachedState = await readCachedGameState();
+
+        if (cancelled) {
+          return;
+        }
+
+        if (cachedState) {
+          setCards(cachedState.cards);
+          setAnswerKey(cachedState.answerKey);
+          setFieldIds(cachedState.fieldIds);
+          setPlayIds(cachedState.playIds);
+          setGamePhase(cachedState.gamePhase);
+          setSubmitTries(cachedState.submitTries);
+          playItemLayouts.current.clear();
+          return;
+        }
+
+        const response = await fetchGameWords();
 
         if (cancelled) {
           return;
@@ -106,6 +132,7 @@ export const ConstellationBoard: React.FC = () => {
         setWordLoadError(message);
       } finally {
         if (!cancelled) {
+          cacheReadyRef.current = true;
           setLoadingWords(false);
         }
       }
@@ -117,6 +144,22 @@ export const ConstellationBoard: React.FC = () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!cacheReadyRef.current || cards.length === 0 || answerKey.length === 0) {
+      return;
+    }
+
+    writeCachedGameState({
+      version: 1,
+      cards,
+      answerKey,
+      fieldIds,
+      playIds,
+      gamePhase,
+      submitTries,
+    });
+  }, [answerKey, cards, fieldIds, gamePhase, playIds, submitTries]);
 
   const refreshFieldLayout = useCallback(() => {
     measureViewInWindow(fieldRef.current, (rect) => {
@@ -197,6 +240,28 @@ export const ConstellationBoard: React.FC = () => {
     }
   }, [answerKey, interactionsLocked, playIds, showToast, submitTries]);
 
+  const moveCardToPlayEnd = useCallback(
+    (cardId: string) => {
+      if (interactionsLocked || !fieldIds.includes(cardId)) {
+        return;
+      }
+
+      setFieldIds((prev) => prev.filter((id) => id !== cardId));
+      setPlayIds((prev) => (prev.includes(cardId) ? prev : [...prev, cardId]));
+      requestAnimationFrame(() => {
+        refreshFieldLayout();
+        refreshPlayLayout();
+      });
+    },
+    [fieldIds, interactionsLocked, refreshFieldLayout, refreshPlayLayout],
+  );
+
+  const getPlayInsertionY = useCallback((pointerY: number) => {
+    return (
+      pointerY + (dragStateRef.current?.pointerToCardCenterOffsetY ?? 0)
+    );
+  }, []);
+
   const updateDropPreview = useCallback(
     (x: number, y: number) => {
       if (interactionsLocked) {
@@ -205,9 +270,10 @@ export const ConstellationBoard: React.FC = () => {
 
       if (pointInRect(x, y, playLayout.current)) {
         setHoverZone('play');
-        const playIdsForInsert = playIds.filter((id) => id !== draggingCardId);
+        const activeCardId = dragStateRef.current?.cardId ?? draggingCardId;
+        const playIdsForInsert = playIds.filter((id) => id !== activeCardId);
         const index = getPlayInsertionIndex(
-          y,
+          getPlayInsertionY(y),
           playIdsForInsert,
           playItemLayouts.current,
         );
@@ -224,7 +290,7 @@ export const ConstellationBoard: React.FC = () => {
       setHoverZone(null);
       setDropPreviewIndex(null);
     },
-    [draggingCardId, interactionsLocked, playIds],
+    [draggingCardId, getPlayInsertionY, interactionsLocked, playIds],
   );
 
   const handleDragStart = useCallback(
@@ -243,6 +309,7 @@ export const ConstellationBoard: React.FC = () => {
         fromZone,
         fromFieldIndex,
         fromPlayIndex,
+        pointerToCardCenterOffsetY: cardRect.y + cardRect.height / 2 - y,
       };
 
       dragStateRef.current = nextDrag;
@@ -272,6 +339,7 @@ export const ConstellationBoard: React.FC = () => {
 
       const activeDrag = dragStateRef.current;
       if (!activeDrag || activeDrag.cardId !== cardId) {
+        clearDrag();
         return;
       }
 
@@ -296,19 +364,11 @@ export const ConstellationBoard: React.FC = () => {
 
       if (pointInRect(x, y, playLayout.current)) {
         const playIdsForInsert = playIds.filter((id) => id !== cardId);
-        let insertIndex = getPlayInsertionIndex(
-          y,
+        const insertIndex = getPlayInsertionIndex(
+          getPlayInsertionY(y),
           playIdsForInsert,
           playItemLayouts.current,
         );
-
-        if (
-          fromZone === 'play' &&
-          fromPlayIndex !== undefined &&
-          fromPlayIndex < insertIndex
-        ) {
-          insertIndex -= 1;
-        }
 
         setFieldIds((prev) => prev.filter((id) => id !== cardId));
         setPlayIds((prev) => {
@@ -340,6 +400,7 @@ export const ConstellationBoard: React.FC = () => {
       clearDrag,
       allCardIds,
       interactionsLocked,
+      getPlayInsertionY,
       playIds,
       refreshFieldLayout,
       refreshPlayLayout,
@@ -353,7 +414,6 @@ export const ConstellationBoard: React.FC = () => {
       return (
         <View style={styles.actionColumn}>
           <GameBanner variant="success" />
-          <Button title="Reset" onPress={resetGame} variant="secondary" />
         </View>
       );
     }
@@ -361,7 +421,6 @@ export const ConstellationBoard: React.FC = () => {
       return (
         <View style={styles.actionColumn}>
           <GameBanner variant="failed" />
-          <Button title="Reset" onPress={resetGame} variant="secondary" />
         </View>
       );
     }
@@ -400,44 +459,6 @@ export const ConstellationBoard: React.FC = () => {
             <Text style={styles.statusText}>Unable to load words.</Text>
           </View>
         )}
-        <View
-          ref={fieldRef}
-          style={[
-            styles.section,
-            hoverZone === 'field' && styles.sectionActive,
-            interactionsLocked && styles.sectionLocked,
-          ]}
-          onLayout={onFieldLayout}
-          accessibilityLabel="card-field"
-        >
-          <Text style={styles.sectionLabel}>card-field</Text>
-          <View style={styles.fieldRow}>
-            {fieldIds.map((cardId) => {
-              const card = cardsById.get(cardId);
-              if (!card) {
-                return null;
-              }
-              return (
-                <DraggableWordCard
-                  key={cardId}
-                  cardId={cardId}
-                  word={card.word}
-                  isDragging={draggingCardId === cardId}
-                  disabled={interactionsLocked}
-                  fingerX={dragSession.fingerX}
-                  fingerY={dragSession.fingerY}
-                  onDragStart={handleDragStart}
-                  onDragMove={handleDragMove}
-                  onDragEnd={handleDragEnd}
-                />
-              );
-            })}
-            {fieldIds.length === 0 && (
-              <Text style={styles.hint}>Drop cards here</Text>
-            )}
-          </View>
-        </View>
-
         <View
           ref={playAreaRef}
           style={[
@@ -481,12 +502,52 @@ export const ConstellationBoard: React.FC = () => {
                   onDragStart={handleDragStart}
                   onDragMove={handleDragMove}
                   onDragEnd={handleDragEnd}
+                  onPress={moveCardToPlayEnd}
                 />
               );
             })}
             {dropPreviewIndex ===
               playIds.filter((id) => id !== draggingCardId).length && (
               <View style={styles.insertPreviewEnd} />
+            )}
+          </View>
+        </View>
+
+        <View
+          ref={fieldRef}
+          style={[
+            styles.section,
+            hoverZone === 'field' && styles.sectionActive,
+            interactionsLocked && styles.sectionLocked,
+          ]}
+          onLayout={onFieldLayout}
+          accessibilityLabel="card-field"
+        >
+          <Text style={styles.sectionLabel}>card-field</Text>
+          <View style={styles.fieldRow}>
+            {fieldIds.map((cardId) => {
+              const card = cardsById.get(cardId);
+              if (!card) {
+                return null;
+              }
+              return (
+                <DraggableWordCard
+                  key={cardId}
+                  cardId={cardId}
+                  word={card.word}
+                  isDragging={draggingCardId === cardId}
+                  disabled={interactionsLocked}
+                  fingerX={dragSession.fingerX}
+                  fingerY={dragSession.fingerY}
+                  onDragStart={handleDragStart}
+                  onDragMove={handleDragMove}
+                  onDragEnd={handleDragEnd}
+                  onPress={moveCardToPlayEnd}
+                />
+              );
+            })}
+            {fieldIds.length === 0 && (
+              <Text style={styles.hint}>Drop cards here</Text>
             )}
           </View>
         </View>

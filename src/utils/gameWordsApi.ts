@@ -8,7 +8,6 @@ import type { GameWordsResponse } from '@constellations/shared';
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
 
 interface FetchWordsOptions {
-  theme?: string;
   retries?: number;
   timeoutMs?: number;
 }
@@ -21,13 +20,9 @@ interface FetchWordsOptions {
 export async function fetchGameWords(
   options: FetchWordsOptions = {},
 ): Promise<GameWordsResponse> {
-  const { theme = 'constellation', retries = 1, timeoutMs = 10000 } = options;
+  const { retries = 1, timeoutMs = 10000 } = options;
 
-  const params = new URLSearchParams({
-    theme,
-  });
-
-  const url = `${API_BASE_URL}/api/game/words?${params}`;
+  const url = `${API_BASE_URL}/api/game/words`;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {

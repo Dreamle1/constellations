@@ -40,7 +40,7 @@ The server will start on `http://localhost:3001` and auto-reload on changes.
 Open a new terminal and test the API:
 
 ```bash
-curl "http://localhost:3001/api/game/words?count=5&theme=constellation"
+curl "http://localhost:3001/api/game/words"
 ```
 
 You should see a JSON response with 5 random words.
@@ -88,7 +88,7 @@ const [words, setWords] = useState<string[]>([]);
 const [loading, setLoading] = useState(true);
 
 useEffect(() => {
-  fetchGameWords({ count: 5, theme: 'constellation' })
+  fetchGameWords()
     .then(setWords)
     .finally(() => setLoading(false));
 }, []);

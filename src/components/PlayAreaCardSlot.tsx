@@ -24,6 +24,7 @@ interface PlayAreaCardSlotProps {
   ) => void;
   onDragMove: (cardId: string, x: number, y: number) => void;
   onDragEnd: (cardId: string, x: number, y: number) => void;
+  onPress?: (cardId: string) => void;
 }
 
 function measureViewInWindow(
@@ -57,6 +58,7 @@ export const PlayAreaCardSlot: React.FC<PlayAreaCardSlotProps> = ({
   onDragStart,
   onDragMove,
   onDragEnd,
+  onPress,
 }) => {
   const slotRef = useRef<RNView>(null);
 
@@ -81,6 +83,7 @@ export const PlayAreaCardSlot: React.FC<PlayAreaCardSlotProps> = ({
           onDragStart={onDragStart}
           onDragMove={onDragMove}
           onDragEnd={onDragEnd}
+          onPress={onPress}
         />
       </View>
     </View>

@@ -40,6 +40,7 @@ interface DraggableWordCardProps {
   ) => void;
   onDragMove: (cardId: string, x: number, y: number) => void;
   onDragEnd: (cardId: string, x: number, y: number) => void;
+  onPress?: (cardId: string) => void;
 }
 
 export const DraggableWordCard: React.FC<DraggableWordCardProps> = ({
@@ -52,9 +53,12 @@ export const DraggableWordCard: React.FC<DraggableWordCardProps> = ({
   onDragStart,
   onDragMove,
   onDragEnd,
+  onPress,
 }) => {
   const cardRef = useRef<RNView>(null);
   const cardIdRef = useRef(cardId);
+  const gestureActiveRef = useRef(false);
+  const dragStartTokenRef = useRef(0);
   cardIdRef.current = cardId;
 
   const syncFinger = useCallback(
@@ -70,7 +74,19 @@ export const DraggableWordCard: React.FC<DraggableWordCardProps> = ({
       if (disabled) {
         return;
       }
+
+      gestureActiveRef.current = true;
+      const dragStartToken = dragStartTokenRef.current + 1;
+      dragStartTokenRef.current = dragStartToken;
+
       measureViewInWindow(cardRef.current, (cardRect) => {
+        if (
+          !gestureActiveRef.current ||
+          dragStartTokenRef.current !== dragStartToken
+        ) {
+          return;
+        }
+
         onDragStart(cardIdRef.current, absoluteX, absoluteY, cardRect);
       });
     },
@@ -87,25 +103,22 @@ export const DraggableWordCard: React.FC<DraggableWordCardProps> = ({
 
   const handleDragEnd = useCallback(
     (absoluteX: number, absoluteY: number) => {
+      gestureActiveRef.current = false;
       syncFinger(absoluteX, absoluteY);
       onDragEnd(cardIdRef.current, absoluteX, absoluteY);
     },
     [onDragEnd, syncFinger],
   );
 
-  const panGesture = useMemo(() => {
-    return Gesture.Pan()
+  const gesture = useMemo(() => {
+    const panGesture = Gesture.Pan()
       .enabled(!disabled)
-      .minDistance(0)
+      .minDistance(4)
       .onStart((event) => {
         try {
-          console.log('Drag START - getting coords');
           const x = event.absoluteX ?? event.x;
           const y = event.absoluteY ?? event.y;
-          console.log('Drag START - coords:', { x, y, cardId });
-          console.log('Drag START - calling measureAndStart');
           runOnJS(measureAndStart)(x, y);
-          console.log('Drag START - measureAndStart called');
         } catch (error) {
           console.error('Error in drag start:', error, (error as Error).message);
         }
@@ -123,16 +136,26 @@ export const DraggableWordCard: React.FC<DraggableWordCardProps> = ({
         try {
           const x = event.absoluteX ?? event.x;
           const y = event.absoluteY ?? event.y;
-          console.log('Drag END:', { x, y, cardId });
           runOnJS(handleDragEnd)(x, y);
         } catch (error) {
           console.error('Error in drag end:', error, (error as Error).message);
         }
       });
-  }, [disabled, handleDragEnd, handleDragMove, measureAndStart, cardId]);
+
+    const tapGesture = Gesture.Tap()
+      .enabled(!disabled && !!onPress)
+      .maxDistance(8)
+      .onEnd((_event, success) => {
+        if (success && onPress) {
+          runOnJS(onPress)(cardIdRef.current);
+        }
+      });
+
+    return Gesture.Race(panGesture, tapGesture);
+  }, [disabled, handleDragEnd, handleDragMove, measureAndStart, onPress]);
 
   return (
-    <GestureDetector gesture={panGesture}>
+    <GestureDetector gesture={gesture}>
       <View ref={cardRef} collapsable={false}>
         <WordCard word={word} ghost={isDragging} />
       </View>

@@ -14,7 +14,7 @@ export const AppBanner: React.FC<AppBannerProps> = ({ title }) => {
     setLoading(true);
     try {
       console.log('🎮 Requesting words from backend...');
-      const words = await fetchGameWords({ theme: 'constellation' });
+      const words = await fetchGameWords();
       console.log('✅ Received words:', words);
     } catch (error) {
       console.error('❌ Error fetching words:', error);

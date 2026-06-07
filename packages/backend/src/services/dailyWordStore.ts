@@ -5,7 +5,6 @@ import type { WordItem } from './wordGenerationService';
 
 export interface StoredDailyWords {
   date: string;
-  theme: string;
   words: WordItem[];
   answer: string[];
   answerKey: string[];
@@ -40,7 +39,6 @@ export class DailyWordStore {
 
       if (
         typeof parsed.date !== 'string' ||
-        typeof parsed.theme !== 'string' ||
         !Array.isArray(parsed.words) ||
         !Array.isArray(parsed.answer) ||
         !Array.isArray(parsed.answerKey) ||
@@ -51,7 +49,6 @@ export class DailyWordStore {
 
       return {
         date: parsed.date,
-        theme: parsed.theme,
         words: parsed.words.filter(
           (item): item is WordItem =>
             typeof item?.id === 'string' && typeof item.word === 'string',

@@ -102,7 +102,7 @@ The frontend calls the backend API using `fetchGameWords()` from `src/utils/game
 ```typescript
 import { fetchGameWords } from '@/utils/gameWordsApi';
 
-const words = await fetchGameWords({ count: 5, theme: 'constellation' });
+const words = await fetchGameWords();
 ```
 
 By default, it connects to `http://localhost:3001` in development.
