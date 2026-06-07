@@ -256,6 +256,28 @@ export const ConstellationBoard: React.FC = () => {
     [fieldIds, interactionsLocked, refreshFieldLayout, refreshPlayLayout],
   );
 
+  const moveCardToField = useCallback(
+    (cardId: string) => {
+      if (interactionsLocked || !playIds.includes(cardId)) {
+        return;
+      }
+
+      setPlayIds((prev) => prev.filter((id) => id !== cardId));
+      setFieldIds((prev) => mergeIntoFieldOrder(prev, cardId, allCardIds));
+      requestAnimationFrame(() => {
+        refreshFieldLayout();
+        refreshPlayLayout();
+      });
+    },
+    [
+      allCardIds,
+      interactionsLocked,
+      playIds,
+      refreshFieldLayout,
+      refreshPlayLayout,
+    ],
+  );
+
   const getPlayInsertionY = useCallback((pointerY: number) => {
     return (
       pointerY + (dragStateRef.current?.pointerToCardCenterOffsetY ?? 0)
@@ -502,7 +524,7 @@ export const ConstellationBoard: React.FC = () => {
                   onDragStart={handleDragStart}
                   onDragMove={handleDragMove}
                   onDragEnd={handleDragEnd}
-                  onPress={moveCardToPlayEnd}
+                  onPress={moveCardToField}
                 />
               );
             })}
@@ -557,7 +579,7 @@ export const ConstellationBoard: React.FC = () => {
             pointerEvents="none"
             style={[styles.floatingCard, dragSession.floatingStyle]}
           >
-            <WordCard word={draggingCard.word} />
+            <WordCard cardId={draggingCard.id} word={draggingCard.word} />
           </Animated.View>
         )}
       </View>

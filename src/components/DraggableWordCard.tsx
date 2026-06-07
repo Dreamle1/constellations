@@ -157,7 +157,7 @@ export const DraggableWordCard: React.FC<DraggableWordCardProps> = ({
   return (
     <GestureDetector gesture={gesture}>
       <View ref={cardRef} collapsable={false}>
-        <WordCard word={word} ghost={isDragging} />
+        <WordCard cardId={cardId} word={word} ghost={isDragging} />
       </View>
     </GestureDetector>
   );
