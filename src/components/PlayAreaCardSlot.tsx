@@ -123,10 +123,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#7986cb',
     borderRadius: 2,
     height: 4,
-    position: 'absolute',
-    top: -8,
+    marginVertical: 10,
     width: 120,
-    zIndex: 2,
   },
   hiddenDragSource: {
     height: 0,

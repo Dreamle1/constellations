@@ -8,6 +8,7 @@ interface WordCardProps {
   cardId?: string;
   word: string;
   style?: ViewStyle;
+  ghost?: boolean;
 }
 
 const CARD_COLORS = [
@@ -41,6 +42,7 @@ export const WordCard: React.FC<WordCardProps> = ({
   cardId,
   word,
   style,
+  ghost,
 }) => {
   const cardColor = getCardColor(cardId, word);
 
@@ -52,6 +54,7 @@ export const WordCard: React.FC<WordCardProps> = ({
           backgroundColor: cardColor.background,
           borderColor: cardColor.border,
         },
+        ghost && styles.ghost,
         style,
       ]}
       accessibilityRole="button"
@@ -75,6 +78,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.12,
     shadowRadius: 4,
     width: CARD_WIDTH,
+  },
+  ghost: {
+    elevation: 0,
+    opacity: 0.35,
+    shadowOpacity: 0,
   },
   word: {
     color: '#1a1a2e',

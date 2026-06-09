@@ -1023,12 +1023,16 @@ export const ConstellationBoard: React.FC = () => {
               if (!card) {
                 return null;
               }
+              const isHiddenFieldDragSource =
+                dragState?.fromZone === 'field' &&
+                draggingCardId === cardId;
               return (
                 <DraggableWordCard
                   key={cardId}
                   cardId={cardId}
                   word={card.word}
                   disabled={interactionsLocked}
+                  hidden={isHiddenFieldDragSource}
                   onDragStart={handleDragStart}
                   onDragMove={handleDragMove}
                   onDragEnd={handleDragEnd}
@@ -1062,7 +1066,7 @@ export const ConstellationBoard: React.FC = () => {
             },
           ]}
         >
-          <WordCard cardId={draggingCard.id} word={draggingCard.word} />
+          <WordCard cardId={draggingCard.id} word={draggingCard.word} ghost />
         </View>
       )}
     </View>
@@ -1125,11 +1129,9 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     backgroundColor: '#7986cb',
     borderRadius: 2,
-    bottom: 2,
     height: 4,
-    position: 'absolute',
+    marginVertical: 10,
     width: 120,
-    zIndex: 2,
   },
   flipButton: {
     backgroundColor: '#ffffff',
