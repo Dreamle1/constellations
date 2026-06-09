@@ -8,7 +8,6 @@ interface WordCardProps {
   cardId?: string;
   word: string;
   style?: ViewStyle;
-  ghost?: boolean;
 }
 
 const CARD_COLORS = [
@@ -17,6 +16,10 @@ const CARD_COLORS = [
   { background: '#dcfce7', border: '#4f9f69' },
   { background: '#fff1c7', border: '#c28a21' },
   { background: '#e9d5ff', border: '#8b5fbf' },
+  { background: '#cffafe', border: '#0891b2' },
+  { background: '#fed7aa', border: '#c2410c' },
+  { background: '#d9f99d', border: '#65a30d' },
+  { background: '#fbcfe8', border: '#be185d' },
 ] as const;
 
 function getFallbackColorIndex(word: string): number {
@@ -38,7 +41,6 @@ export const WordCard: React.FC<WordCardProps> = ({
   cardId,
   word,
   style,
-  ghost,
 }) => {
   const cardColor = getCardColor(cardId, word);
 
@@ -50,13 +52,12 @@ export const WordCard: React.FC<WordCardProps> = ({
           backgroundColor: cardColor.background,
           borderColor: cardColor.border,
         },
-        ghost && styles.ghost,
         style,
       ]}
       accessibilityRole="button"
       accessibilityLabel={word}
     >
-      <Text style={[styles.word, ghost && styles.ghostWord]}>{word}</Text>
+      <Text style={styles.word}>{word}</Text>
     </View>
   );
 };
@@ -74,14 +75,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.12,
     shadowRadius: 4,
     width: CARD_WIDTH,
-  },
-  ghost: {
-    elevation: 0,
-    opacity: 0.5,
-    shadowOpacity: 0,
-  },
-  ghostWord: {
-    opacity: 1,
   },
   word: {
     color: '#1a1a2e',

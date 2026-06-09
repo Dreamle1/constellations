@@ -1,14 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   LayoutChangeEvent,
+  Pressable,
   StyleSheet,
   Text,
   View,
   type View as RNView,
 } from 'react-native';
-import Animated from 'react-native-reanimated';
 
 import {
+  GAME_LEVELS,
   MAX_SUBMIT_TRIES,
   TOAST_DURATION_MS,
 } from '@/constants/game';
@@ -19,9 +20,9 @@ import type {
   WordCardModel,
   Zone,
 } from '@/types/cards';
-import { useDragSession } from '@/hooks/useDragSession';
 import { fetchGameWords } from '@/utils/gameWordsApi';
 import {
+  type CachedCompletedLevelState,
   readCachedGameState,
   writeCachedGameState,
 } from '@/utils/gameStateCache';
@@ -69,17 +70,29 @@ export const ConstellationBoard: React.FC = () => {
   const [gamePhase, setGamePhase] = useState<GamePhase>('playing');
   const [submitTries, setSubmitTries] = useState(0);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [currentLevelIndex, setCurrentLevelIndex] = useState(0);
+  const [unlockedLevelIndex, setUnlockedLevelIndex] = useState(0);
+  const [completedLevelIndexes, setCompletedLevelIndexes] = useState<number[]>(
+    [],
+  );
+  const [completedLevelStates, setCompletedLevelStates] = useState<
+    CachedCompletedLevelState[]
+  >([]);
+  const [playAreaFlipped, setPlayAreaFlipped] = useState(false);
 
   const containerRef = useRef<RNView>(null);
   const fieldRef = useRef<RNView>(null);
   const playAreaRef = useRef<RNView>(null);
+  const playColumnRef = useRef<RNView>(null);
   const dragStateRef = useRef<DragState | null>(null);
   const cacheReadyRef = useRef(false);
   const fieldLayout = useRef<LayoutRect | null>(null);
   const playLayout = useRef<LayoutRect | null>(null);
+  const playColumnLayout = useRef<LayoutRect | null>(null);
   const playItemLayouts = useRef<Map<string, LayoutRect>>(new Map());
 
-  const dragSession = useDragSession(containerRef);
+  const dragLayerLayout = useRef<LayoutRect | null>(null);
+
   const draggingCardId = dragState?.cardId ?? null;
   const interactionsLocked =
     gamePhase !== 'playing' || loadingWords || !!wordLoadError || answerKey.length === 0;
@@ -99,17 +112,45 @@ export const ConstellationBoard: React.FC = () => {
         }
 
         if (cachedState) {
+          const cachedCurrentLevelIndex = Math.min(
+            cachedState.currentLevelIndex,
+            GAME_LEVELS.length - 1,
+          );
+          const cachedUnlockedLevelIndex = Math.min(
+            Math.max(cachedState.unlockedLevelIndex, cachedCurrentLevelIndex),
+            GAME_LEVELS.length - 1,
+          );
+
+          setCurrentLevelIndex(cachedCurrentLevelIndex);
+          setUnlockedLevelIndex(cachedUnlockedLevelIndex);
+          setCompletedLevelIndexes(
+            Array.from(
+              new Set(
+                cachedState.completedLevelIndexes.filter(
+                  (index) => index >= 0 && index < GAME_LEVELS.length,
+                ),
+              ),
+            ),
+          );
+          setCompletedLevelStates(
+            cachedState.completedLevelStates.filter(
+              (state) => state.levelIndex >= 0 && state.levelIndex < GAME_LEVELS.length,
+            ),
+          );
           setCards(cachedState.cards);
           setAnswerKey(cachedState.answerKey);
           setFieldIds(cachedState.fieldIds);
           setPlayIds(cachedState.playIds);
           setGamePhase(cachedState.gamePhase);
           setSubmitTries(cachedState.submitTries);
+          setPlayAreaFlipped(cachedState.playAreaFlipped);
           playItemLayouts.current.clear();
           return;
         }
 
-        const response = await fetchGameWords();
+        const response = await fetchGameWords({
+          wordCount: GAME_LEVELS[0].wordCount,
+        });
 
         if (cancelled) {
           return;
@@ -121,6 +162,7 @@ export const ConstellationBoard: React.FC = () => {
         setPlayIds([]);
         setGamePhase('playing');
         setSubmitTries(0);
+        setPlayAreaFlipped(false);
         playItemLayouts.current.clear();
       } catch (error) {
         if (cancelled) {
@@ -151,15 +193,33 @@ export const ConstellationBoard: React.FC = () => {
     }
 
     writeCachedGameState({
-      version: 1,
+      version: 7,
+      levelIndex: currentLevelIndex,
       cards,
       answerKey,
       fieldIds,
       playIds,
       gamePhase,
       submitTries,
+      playAreaFlipped,
+      currentLevelIndex,
+      unlockedLevelIndex,
+      completedLevelIndexes,
+      completedLevelStates,
     });
-  }, [answerKey, cards, fieldIds, gamePhase, playIds, submitTries]);
+  }, [
+    answerKey,
+    cards,
+    completedLevelStates,
+    completedLevelIndexes,
+    currentLevelIndex,
+    fieldIds,
+    gamePhase,
+    playIds,
+    playAreaFlipped,
+    submitTries,
+    unlockedLevelIndex,
+  ]);
 
   const refreshFieldLayout = useCallback(() => {
     measureViewInWindow(fieldRef.current, (rect) => {
@@ -173,8 +233,42 @@ export const ConstellationBoard: React.FC = () => {
     });
   }, []);
 
+  const refreshPlayColumnLayout = useCallback(() => {
+    measureViewInWindow(playColumnRef.current, (rect) => {
+      playColumnLayout.current = rect;
+    });
+  }, []);
+
+  const refreshDragLayerLayout = useCallback(
+    (callback?: (rect: LayoutRect) => void) => {
+      measureViewInWindow(containerRef.current, (rect) => {
+        dragLayerLayout.current = rect;
+        callback?.(rect);
+      });
+    },
+    [],
+  );
+
+  const onContainerLayout = useCallback(
+    (_event: LayoutChangeEvent) => {
+      refreshDragLayerLayout();
+    },
+    [refreshDragLayerLayout],
+  );
+
   const handlePlayItemLayout = useCallback((cardId: string, rect: LayoutRect) => {
-    playItemLayouts.current.set(cardId, rect);
+    const columnLayout = playColumnLayout.current;
+    if (!columnLayout) {
+      playItemLayouts.current.set(cardId, rect);
+      return;
+    }
+
+    playItemLayouts.current.set(cardId, {
+      x: rect.x - columnLayout.x,
+      y: rect.y - columnLayout.y,
+      width: rect.width,
+      height: rect.height,
+    });
   }, []);
 
   const onFieldLayout = useCallback(
@@ -187,8 +281,16 @@ export const ConstellationBoard: React.FC = () => {
   const onPlayAreaLayout = useCallback(
     (_event: LayoutChangeEvent) => {
       refreshPlayLayout();
+      refreshPlayColumnLayout();
     },
-    [refreshPlayLayout],
+    [refreshPlayColumnLayout, refreshPlayLayout],
+  );
+
+  const onPlayColumnLayout = useCallback(
+    (_event: LayoutChangeEvent) => {
+      refreshPlayColumnLayout();
+    },
+    [refreshPlayColumnLayout],
   );
 
   const clearDrag = useCallback(() => {
@@ -196,24 +298,174 @@ export const ConstellationBoard: React.FC = () => {
     setDragState(null);
     setHoverZone(null);
     setDropPreviewIndex(null);
-    dragSession.endDrag();
-  }, [dragSession]);
+  }, []);
 
   const resetGame = useCallback(() => {
     clearDrag();
     setFieldIds(cards.map((card) => card.id));
     setPlayIds([]);
     setToastMessage(null);
+    setPlayAreaFlipped(false);
     playItemLayouts.current.clear();
     requestAnimationFrame(() => {
       refreshFieldLayout();
       refreshPlayLayout();
+      refreshPlayColumnLayout();
     });
-  }, [cards, clearDrag, refreshFieldLayout, refreshPlayLayout]);
+  }, [
+    cards,
+    clearDrag,
+    refreshFieldLayout,
+    refreshPlayColumnLayout,
+    refreshPlayLayout,
+  ]);
+
+  const loadLevel = useCallback(
+    async (levelIndex: number) => {
+      const level = GAME_LEVELS[levelIndex];
+      if (!level || levelIndex > unlockedLevelIndex) {
+        return;
+      }
+
+      clearDrag();
+
+      const completedLevelState = completedLevelStates.find(
+        (state) => state.levelIndex === levelIndex,
+      );
+
+      if (completedLevelState) {
+        setCurrentLevelIndex(levelIndex);
+        setCards(completedLevelState.cards);
+        setAnswerKey(completedLevelState.answerKey);
+        setFieldIds(completedLevelState.fieldIds);
+        setPlayIds(completedLevelState.playIds);
+        setGamePhase(completedLevelState.gamePhase);
+        setSubmitTries(completedLevelState.submitTries);
+        setPlayAreaFlipped(completedLevelState.playAreaFlipped);
+        setToastMessage(null);
+        setWordLoadError(null);
+        setLoadingWords(false);
+        playItemLayouts.current.clear();
+        requestAnimationFrame(() => {
+          refreshFieldLayout();
+          refreshPlayLayout();
+          refreshPlayColumnLayout();
+        });
+        return;
+      }
+
+      setLoadingWords(true);
+      setWordLoadError(null);
+      setToastMessage(null);
+      playItemLayouts.current.clear();
+
+      try {
+        const response = await fetchGameWords({ wordCount: level.wordCount });
+
+        setCurrentLevelIndex(levelIndex);
+        setCards(response.words);
+        setAnswerKey(response.answerKey);
+        setFieldIds(response.words.map((card) => card.id));
+        setPlayIds([]);
+        setGamePhase('playing');
+        setSubmitTries(0);
+        setPlayAreaFlipped(false);
+        requestAnimationFrame(() => {
+          refreshFieldLayout();
+          refreshPlayLayout();
+          refreshPlayColumnLayout();
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'Unable to load words';
+        setWordLoadError(message);
+      } finally {
+        setLoadingWords(false);
+      }
+    },
+    [
+      clearDrag,
+      completedLevelStates,
+      refreshFieldLayout,
+      refreshPlayLayout,
+      unlockedLevelIndex,
+    ],
+  );
 
   const showToast = useCallback((message: string) => {
     setToastMessage(message);
   }, []);
+
+  const getCompletedLevelIndexes = useCallback(
+    (levelIndex: number) =>
+      completedLevelIndexes.includes(levelIndex)
+        ? completedLevelIndexes
+        : [...completedLevelIndexes, levelIndex].sort((a, b) => a - b),
+    [completedLevelIndexes],
+  );
+
+  const getCompletedLevelStates = useCallback(
+    (state: CachedCompletedLevelState) => [
+      ...completedLevelStates.filter(
+        (item) => item.levelIndex !== state.levelIndex,
+      ),
+      state,
+    ].sort((a, b) => a.levelIndex - b.levelIndex),
+    [completedLevelStates],
+  );
+
+  const getDisplayPlayIds = useCallback(
+    (ids: string[]) => (playAreaFlipped ? [...ids].reverse() : ids),
+    [playAreaFlipped],
+  );
+
+  const getPlayInsertionY = useCallback((pointerY: number) => {
+    const layout = playColumnLayout.current;
+    if (!layout) {
+      return null;
+    }
+
+    return pointerY - layout.y;
+  }, []);
+
+  const revealCorrectAnswer = useCallback(
+    (
+      phase: Extract<GamePhase, 'success' | 'failed'>,
+      tries: number,
+    ): CachedCompletedLevelState => ({
+      levelIndex: currentLevelIndex,
+      cards,
+      answerKey,
+      fieldIds: [],
+      playIds: [...answerKey],
+      gamePhase: phase,
+      submitTries: tries,
+      playAreaFlipped: false,
+    }),
+    [answerKey, cards, currentLevelIndex],
+  );
+
+  const getDisplayDropIndex = useCallback(
+    (pointerY: number, displayIdsForInsert: string[]) => {
+      const insertionY = getPlayInsertionY(pointerY);
+      if (insertionY === null) {
+        return null;
+      }
+
+      return getPlayInsertionIndex(
+        insertionY,
+        displayIdsForInsert,
+        playItemLayouts.current,
+      );
+    },
+    [getPlayInsertionY],
+  );
+
+  const toLogicalPlayIds = useCallback(
+    (displayIds: string[]) =>
+      playAreaFlipped ? [...displayIds].reverse() : displayIds,
+    [playAreaFlipped],
+  );
 
   const handleSubmit = useCallback(() => {
     if (interactionsLocked) {
@@ -228,7 +480,37 @@ export const ConstellationBoard: React.FC = () => {
     }
 
     if (playOrderMatches(playIds, answerKey)) {
+      const completedState = revealCorrectAnswer('success', submitTries);
+      const nextCompletedLevelIndexes =
+        getCompletedLevelIndexes(currentLevelIndex);
+      const nextCompletedLevelStates = getCompletedLevelStates(completedState);
+      const nextUnlockedLevelIndex = Math.max(
+        unlockedLevelIndex,
+        Math.min(currentLevelIndex + 1, GAME_LEVELS.length - 1),
+      );
+
+      setFieldIds(completedState.fieldIds);
+      setPlayIds(completedState.playIds);
+      setPlayAreaFlipped(false);
       setGamePhase('success');
+      setCompletedLevelIndexes(nextCompletedLevelIndexes);
+      setCompletedLevelStates(nextCompletedLevelStates);
+      setUnlockedLevelIndex(nextUnlockedLevelIndex);
+      writeCachedGameState({
+        version: 7,
+        levelIndex: currentLevelIndex,
+        cards,
+        answerKey,
+        fieldIds: completedState.fieldIds,
+        playIds: completedState.playIds,
+        gamePhase: 'success',
+        submitTries,
+        playAreaFlipped: false,
+        currentLevelIndex,
+        unlockedLevelIndex: nextUnlockedLevelIndex,
+        completedLevelIndexes: nextCompletedLevelIndexes,
+        completedLevelStates: nextCompletedLevelStates,
+      });
       return;
     }
 
@@ -236,9 +518,52 @@ export const ConstellationBoard: React.FC = () => {
     setSubmitTries(nextTries);
 
     if (nextTries >= MAX_SUBMIT_TRIES) {
+      const failedState = revealCorrectAnswer('failed', nextTries);
+      const nextCompletedLevelIndexes =
+        getCompletedLevelIndexes(currentLevelIndex);
+      const nextCompletedLevelStates = getCompletedLevelStates(failedState);
+      const nextUnlockedLevelIndex = Math.max(
+        unlockedLevelIndex,
+        Math.min(currentLevelIndex + 1, GAME_LEVELS.length - 1),
+      );
+
+      setFieldIds(failedState.fieldIds);
+      setPlayIds(failedState.playIds);
+      setPlayAreaFlipped(false);
       setGamePhase('failed');
+      setCompletedLevelIndexes(nextCompletedLevelIndexes);
+      setCompletedLevelStates(nextCompletedLevelStates);
+      setUnlockedLevelIndex(nextUnlockedLevelIndex);
+      writeCachedGameState({
+        version: 7,
+        levelIndex: currentLevelIndex,
+        cards,
+        answerKey,
+        fieldIds: failedState.fieldIds,
+        playIds: failedState.playIds,
+        gamePhase: 'failed',
+        submitTries: nextTries,
+        playAreaFlipped: false,
+        currentLevelIndex,
+        unlockedLevelIndex: nextUnlockedLevelIndex,
+        completedLevelIndexes: nextCompletedLevelIndexes,
+        completedLevelStates: nextCompletedLevelStates,
+      });
     }
-  }, [answerKey, interactionsLocked, playIds, showToast, submitTries]);
+  }, [
+    answerKey,
+    cards,
+    currentLevelIndex,
+    fieldIds,
+    getCompletedLevelIndexes,
+    getCompletedLevelStates,
+    interactionsLocked,
+    playIds,
+    revealCorrectAnswer,
+    showToast,
+    submitTries,
+    unlockedLevelIndex,
+  ]);
 
   const moveCardToPlayEnd = useCallback(
     (cardId: string) => {
@@ -247,13 +572,26 @@ export const ConstellationBoard: React.FC = () => {
       }
 
       setFieldIds((prev) => prev.filter((id) => id !== cardId));
-      setPlayIds((prev) => (prev.includes(cardId) ? prev : [...prev, cardId]));
+      setPlayIds((prev) => {
+        if (prev.includes(cardId)) {
+          return prev;
+        }
+        return playAreaFlipped ? [cardId, ...prev] : [...prev, cardId];
+      });
       requestAnimationFrame(() => {
         refreshFieldLayout();
         refreshPlayLayout();
+        refreshPlayColumnLayout();
       });
     },
-    [fieldIds, interactionsLocked, refreshFieldLayout, refreshPlayLayout],
+    [
+      fieldIds,
+      interactionsLocked,
+      playAreaFlipped,
+      refreshFieldLayout,
+      refreshPlayColumnLayout,
+      refreshPlayLayout,
+    ],
   );
 
   const moveCardToField = useCallback(
@@ -267,6 +605,7 @@ export const ConstellationBoard: React.FC = () => {
       requestAnimationFrame(() => {
         refreshFieldLayout();
         refreshPlayLayout();
+        refreshPlayColumnLayout();
       });
     },
     [
@@ -274,15 +613,10 @@ export const ConstellationBoard: React.FC = () => {
       interactionsLocked,
       playIds,
       refreshFieldLayout,
+      refreshPlayColumnLayout,
       refreshPlayLayout,
     ],
   );
-
-  const getPlayInsertionY = useCallback((pointerY: number) => {
-    return (
-      pointerY + (dragStateRef.current?.pointerToCardCenterOffsetY ?? 0)
-    );
-  }, []);
 
   const updateDropPreview = useCallback(
     (x: number, y: number) => {
@@ -293,12 +627,14 @@ export const ConstellationBoard: React.FC = () => {
       if (pointInRect(x, y, playLayout.current)) {
         setHoverZone('play');
         const activeCardId = dragStateRef.current?.cardId ?? draggingCardId;
-        const playIdsForInsert = playIds.filter((id) => id !== activeCardId);
-        const index = getPlayInsertionIndex(
-          getPlayInsertionY(y),
-          playIdsForInsert,
-          playItemLayouts.current,
+        const displayIdsForInsert = getDisplayPlayIds(playIds).filter(
+          (id) => id !== activeCardId,
         );
+        const index = getDisplayDropIndex(
+          y,
+          displayIdsForInsert,
+        );
+        console.log('Calculated drop preview index:', index);
         setDropPreviewIndex(index);
         return;
       }
@@ -312,7 +648,13 @@ export const ConstellationBoard: React.FC = () => {
       setHoverZone(null);
       setDropPreviewIndex(null);
     },
-    [draggingCardId, getPlayInsertionY, interactionsLocked, playIds],
+    [
+      draggingCardId,
+      getDisplayDropIndex,
+      getDisplayPlayIds,
+      interactionsLocked,
+      playIds,
+    ],
   );
 
   const handleDragStart = useCallback(
@@ -320,26 +662,45 @@ export const ConstellationBoard: React.FC = () => {
       if (interactionsLocked) {
         return;
       }
+      console.log('Drag started:', { cardId, x, y, cardRect });
+      const beginDrag = (dragLayerRect: LayoutRect) => {
+        const fromZone: Zone = playIds.includes(cardId) ? 'play' : 'field';
+        const fromFieldIndex =
+          fromZone === 'field' ? fieldIds.indexOf(cardId) : undefined;
+        const fromPlayIndex =
+          fromZone === 'play' ? playIds.indexOf(cardId) : undefined;
+        const nextDrag: DragState = {
+          cardId,
+          fromZone,
+          fromFieldIndex,
+          fromPlayIndex,
+          grabOffsetX: x - cardRect.x,
+          grabOffsetY: y - cardRect.y,
+          pointerX: x,
+          pointerY: y,
+          dragLayerX: dragLayerRect.x,
+          dragLayerY: dragLayerRect.y,
+        };
 
-      const fromZone: Zone = playIds.includes(cardId) ? 'play' : 'field';
-      const fromFieldIndex =
-        fromZone === 'field' ? fieldIds.indexOf(cardId) : undefined;
-      const fromPlayIndex =
-        fromZone === 'play' ? playIds.indexOf(cardId) : undefined;
-      const nextDrag: DragState = {
-        cardId,
-        fromZone,
-        fromFieldIndex,
-        fromPlayIndex,
-        pointerToCardCenterOffsetY: cardRect.y + cardRect.height / 2 - y,
+        dragStateRef.current = nextDrag;
+        setDragState(nextDrag);
+        updateDropPreview(x, y);
       };
 
-      dragStateRef.current = nextDrag;
-      setDragState(nextDrag);
-      dragSession.beginDrag(x, y, cardRect);
-      updateDropPreview(x, y);
+      if (dragLayerLayout.current) {
+        beginDrag(dragLayerLayout.current);
+        return;
+      }
+
+      refreshDragLayerLayout(beginDrag);
     },
-    [fieldIds, interactionsLocked, playIds, dragSession, updateDropPreview],
+    [
+      fieldIds,
+      interactionsLocked,
+      playIds,
+      refreshDragLayerLayout,
+      updateDropPreview,
+    ],
   );
 
   const handleDragMove = useCallback(
@@ -347,6 +708,14 @@ export const ConstellationBoard: React.FC = () => {
       if (interactionsLocked || dragStateRef.current?.cardId !== cardId) {
         return;
       }
+      console.log('Drag moved:', { cardId, x, y });
+      const nextDrag = {
+        ...dragStateRef.current,
+        pointerX: x,
+        pointerY: y,
+      };
+      dragStateRef.current = nextDrag;
+      setDragState(nextDrag);
       updateDropPreview(x, y);
     },
     [interactionsLocked, updateDropPreview],
@@ -358,6 +727,7 @@ export const ConstellationBoard: React.FC = () => {
         clearDrag();
         return;
       }
+      console.log('Drag ended:', { cardId, x, y });
 
       const activeDrag = dragStateRef.current;
       if (!activeDrag || activeDrag.cardId !== cardId) {
@@ -380,23 +750,28 @@ export const ConstellationBoard: React.FC = () => {
         requestAnimationFrame(() => {
           refreshFieldLayout();
           refreshPlayLayout();
+          refreshPlayColumnLayout();
         });
         return;
       }
 
       if (pointInRect(x, y, playLayout.current)) {
-        const playIdsForInsert = playIds.filter((id) => id !== cardId);
-        const insertIndex = getPlayInsertionIndex(
-          getPlayInsertionY(y),
-          playIdsForInsert,
-          playItemLayouts.current,
+        const displayIds = getDisplayPlayIds(playIds);
+        const displayIdsForInsert = displayIds.filter((id) => id !== cardId);
+        const displayInsertIndex = getDisplayDropIndex(
+          y,
+          displayIdsForInsert,
         );
+        if (displayInsertIndex === null) {
+          clearDrag();
+          return;
+        }
 
         setFieldIds((prev) => prev.filter((id) => id !== cardId));
-        setPlayIds((prev) => {
-          const next = prev.filter((id) => id !== cardId);
-          next.splice(insertIndex, 0, cardId);
-          return next;
+        setPlayIds(() => {
+          const nextDisplayIds = [...displayIdsForInsert];
+          nextDisplayIds.splice(displayInsertIndex, 0, cardId);
+          return toLogicalPlayIds(nextDisplayIds);
         });
       } else if (fromZone === 'field') {
         setPlayIds((prev) => prev.filter((id) => id !== cardId));
@@ -416,26 +791,51 @@ export const ConstellationBoard: React.FC = () => {
       requestAnimationFrame(() => {
         refreshFieldLayout();
         refreshPlayLayout();
+        refreshPlayColumnLayout();
       });
     },
     [
       clearDrag,
       allCardIds,
       interactionsLocked,
-      getPlayInsertionY,
+      getDisplayPlayIds,
+      getDisplayDropIndex,
       playIds,
       refreshFieldLayout,
+      refreshPlayColumnLayout,
       refreshPlayLayout,
+      toLogicalPlayIds,
     ],
   );
 
   const draggingCard = draggingCardId ? cardsById.get(draggingCardId) : null;
+  const displayPlayIds = getDisplayPlayIds(playIds);
+  const displayPlayIdsForInsert =
+    dragState?.fromZone === 'play' && draggingCardId
+      ? displayPlayIds.filter((id) => id !== draggingCardId)
+      : displayPlayIds;
+  const displayPlayIdsKey = displayPlayIds.join('|');
+  const displayPlayIdsForInsertKey = displayPlayIdsForInsert.join('|');
+
+  useEffect(() => {
+    const visibleIds = new Set(displayPlayIds);
+    playItemLayouts.current.forEach((_layout, cardId) => {
+      if (!visibleIds.has(cardId)) {
+        playItemLayouts.current.delete(cardId);
+      }
+    });
+    requestAnimationFrame(() => {
+      refreshPlayLayout();
+      refreshPlayColumnLayout();
+    });
+  }, [displayPlayIdsKey, refreshPlayColumnLayout, refreshPlayLayout]);
 
   const renderActions = () => {
     if (gamePhase === 'success') {
       return (
         <View style={styles.actionColumn}>
           <GameBanner variant="success" />
+          <Text style={styles.completedLabel}>Game completed</Text>
         </View>
       );
     }
@@ -469,7 +869,11 @@ export const ConstellationBoard: React.FC = () => {
   };
 
   return (
-    <View ref={containerRef} style={styles.container}>
+    <View
+      ref={containerRef}
+      style={styles.container}
+      onLayout={onContainerLayout}
+    >
       <View style={styles.board}>
         {loadingWords && (
           <View style={styles.statusPanel}>
@@ -481,6 +885,52 @@ export const ConstellationBoard: React.FC = () => {
             <Text style={styles.statusText}>Unable to load words.</Text>
           </View>
         )}
+        <View style={styles.levelRow} accessibilityRole="tablist">
+          {GAME_LEVELS.map((level, index) => {
+            const isSelected = index === currentLevelIndex;
+            const isLocked = index > unlockedLevelIndex;
+            const isComplete = completedLevelIndexes.includes(index);
+
+            return (
+              <Pressable
+                key={level.id}
+                style={[
+                  styles.levelTab,
+                  isSelected && styles.levelTabSelected,
+                  isComplete && !isSelected && styles.levelTabComplete,
+                  isLocked && styles.levelTabLocked,
+                ]}
+                onPress={() => loadLevel(index)}
+                disabled={isLocked || loadingWords}
+                accessibilityRole="tab"
+                accessibilityState={{
+                  disabled: isLocked || loadingWords,
+                  selected: isSelected,
+                }}
+              >
+                <Text
+                  style={[
+                    styles.levelTabText,
+                    isSelected && styles.levelTabTextSelected,
+                    isLocked && styles.levelTabTextLocked,
+                  ]}
+                >
+                  {level.label}
+                  {isComplete ? ' done' : ''}
+                </Text>
+                <Text
+                  style={[
+                    styles.levelWordCount,
+                    isSelected && styles.levelTabTextSelected,
+                    isLocked && styles.levelTabTextLocked,
+                  ]}
+                >
+                  {level.wordCount} words
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
         <View
           ref={playAreaRef}
           style={[
@@ -493,33 +943,35 @@ export const ConstellationBoard: React.FC = () => {
           accessibilityLabel="play-area"
         >
           <Text style={styles.sectionLabel}>play-area</Text>
-          <View style={styles.playColumn}>
-            {playIds.length === 0 && hoverZone !== 'play' && (
+          <View
+            ref={playColumnRef}
+            style={styles.playColumn}
+            onLayout={onPlayColumnLayout}
+          >
+            {displayPlayIdsForInsert.length === 0 && hoverZone !== 'play' && (
               <Text style={styles.hint}>Drag cards here to link them</Text>
             )}
-            {playIds.map((cardId, index) => {
+            {displayPlayIds.map((cardId) => {
               const card = cardsById.get(cardId);
               if (!card) {
                 return null;
               }
-
-              const playIdsForInsert = playIds.filter(
-                (id) => id !== draggingCardId,
-              );
+              const isHiddenDragSource =
+                dragState?.fromZone === 'play' && draggingCardId === cardId;
+              const visibleIndex = displayPlayIdsForInsert.indexOf(cardId);
 
               return (
                 <PlayAreaCardSlot
                   key={cardId}
                   cardId={cardId}
                   word={card.word}
-                  isDragging={draggingCardId === cardId}
                   disabled={interactionsLocked}
-                  showConnector={index > 0}
+                  hiddenFromLayout={isHiddenDragSource}
+                  layoutKey={`${displayPlayIdsForInsertKey}:${visibleIndex}`}
+                  showConnector={visibleIndex > 0}
                   showInsertBefore={
-                    dropPreviewIndex === playIdsForInsert.indexOf(cardId)
+                    visibleIndex !== -1 && dropPreviewIndex === visibleIndex
                   }
-                  fingerX={dragSession.fingerX}
-                  fingerY={dragSession.fingerY}
                   onLayoutMeasured={handlePlayItemLayout}
                   onDragStart={handleDragStart}
                   onDragMove={handleDragMove}
@@ -528,11 +980,30 @@ export const ConstellationBoard: React.FC = () => {
                 />
               );
             })}
-            {dropPreviewIndex ===
-              playIds.filter((id) => id !== draggingCardId).length && (
+            {dropPreviewIndex === displayPlayIdsForInsert.length && (
               <View style={styles.insertPreviewEnd} />
             )}
           </View>
+          {!interactionsLocked && (
+            <Pressable
+              style={[
+                styles.flipButton,
+                playAreaFlipped && styles.flipButtonActive,
+              ]}
+              onPress={() => setPlayAreaFlipped((prev) => !prev)}
+              accessibilityRole="button"
+              accessibilityLabel="Flip play area"
+            >
+              <Text
+                style={[
+                  styles.flipButtonText,
+                  playAreaFlipped && styles.flipButtonTextActive,
+                ]}
+              >
+                Flip
+              </Text>
+            </Pressable>
+          )}
         </View>
 
         <View
@@ -557,10 +1028,7 @@ export const ConstellationBoard: React.FC = () => {
                   key={cardId}
                   cardId={cardId}
                   word={card.word}
-                  isDragging={draggingCardId === cardId}
                   disabled={interactionsLocked}
-                  fingerX={dragSession.fingerX}
-                  fingerY={dragSession.fingerY}
                   onDragStart={handleDragStart}
                   onDragMove={handleDragMove}
                   onDragEnd={handleDragEnd}
@@ -573,18 +1041,30 @@ export const ConstellationBoard: React.FC = () => {
             )}
           </View>
         </View>
-
-        {draggingCard && !interactionsLocked && (
-          <Animated.View
-            pointerEvents="none"
-            style={[styles.floatingCard, dragSession.floatingStyle]}
-          >
-            <WordCard cardId={draggingCard.id} word={draggingCard.word} />
-          </Animated.View>
-        )}
       </View>
 
       <View style={styles.footer}>{renderActions()}</View>
+
+      {draggingCard && dragState && !interactionsLocked && (
+        <View
+          pointerEvents="none"
+          style={[
+            styles.floatingCard,
+            {
+              left:
+                dragState.pointerX -
+                dragState.grabOffsetX -
+                dragState.dragLayerX,
+              top:
+                dragState.pointerY -
+                dragState.grabOffsetY -
+                dragState.dragLayerY,
+            },
+          ]}
+        >
+          <WordCard cardId={draggingCard.id} word={draggingCard.word} />
+        </View>
+      )}
     </View>
   );
 };
@@ -607,6 +1087,12 @@ const styles = StyleSheet.create({
     flex: 1,
     overflow: 'visible',
   },
+  completedLabel: {
+    color: '#17665a',
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
   fieldRow: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -617,7 +1103,9 @@ const styles = StyleSheet.create({
   },
   floatingCard: {
     elevation: 12,
+    left: 0,
     position: 'absolute',
+    top: 0,
     zIndex: 1000,
   },
   footer: {
@@ -637,9 +1125,76 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     backgroundColor: '#7986cb',
     borderRadius: 2,
+    bottom: 2,
     height: 4,
-    marginTop: 4,
+    position: 'absolute',
     width: 120,
+    zIndex: 2,
+  },
+  flipButton: {
+    backgroundColor: '#ffffff',
+    borderColor: '#c7cedd',
+    borderRadius: 8,
+    borderWidth: 1,
+    bottom: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    position: 'absolute',
+    right: 10,
+  },
+  flipButtonActive: {
+    backgroundColor: '#e6f4f1',
+    borderColor: '#278777',
+  },
+  flipButtonText: {
+    color: '#465066',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  flipButtonTextActive: {
+    color: '#17665a',
+  },
+  levelRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  levelTab: {
+    alignItems: 'center',
+    backgroundColor: '#f5f7fb',
+    borderColor: '#d6dbe8',
+    borderRadius: 8,
+    borderWidth: 1,
+    flex: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+  },
+  levelTabLocked: {
+    opacity: 0.45,
+  },
+  levelTabComplete: {
+    backgroundColor: '#edf7ed',
+    borderColor: '#75a878',
+  },
+  levelTabSelected: {
+    backgroundColor: '#e6f4f1',
+    borderColor: '#278777',
+  },
+  levelTabText: {
+    color: '#1a1a2e',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  levelTabTextLocked: {
+    color: '#777',
+  },
+  levelTabTextSelected: {
+    color: '#17665a',
+  },
+  levelWordCount: {
+    color: '#666',
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 2,
   },
   playArea: {
     flex: 1,

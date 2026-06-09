@@ -1,20 +1,36 @@
-import React, { useCallback, useRef } from 'react';
-import { StyleSheet, View, type View as RNView } from 'react-native';
-import type { SharedValue } from 'react-native-reanimated';
+import React, { useCallback, useEffect, useRef } from 'react';
+import {
+  LayoutChangeEvent,
+  StyleSheet,
+  View,
+  type View as RNView,
+} from 'react-native';
 
 import type { LayoutRect } from '@/types/cards';
 
 import { DraggableWordCard } from './DraggableWordCard';
 
+function measureViewInWindow(
+  view: RNView | null,
+  callback: (rect: LayoutRect) => void,
+) {
+  if (!view) {
+    return;
+  }
+
+  view.measureInWindow((x, y, width, height) => {
+    callback({ x, y, width, height });
+  });
+}
+
 interface PlayAreaCardSlotProps {
   cardId: string;
   word: string;
-  isDragging: boolean;
   disabled?: boolean;
+  hiddenFromLayout?: boolean;
+  layoutKey: string;
   showConnector: boolean;
   showInsertBefore: boolean;
-  fingerX: SharedValue<number>;
-  fingerY: SharedValue<number>;
   onLayoutMeasured: (cardId: string, rect: LayoutRect) => void;
   onDragStart: (
     cardId: string,
@@ -27,33 +43,14 @@ interface PlayAreaCardSlotProps {
   onPress?: (cardId: string) => void;
 }
 
-function measureViewInWindow(
-  view: RNView | null,
-  callback: (rect: LayoutRect) => void,
-) {
-  if (!view) {
-    return;
-  }
-  try {
-    view.measureInWindow((x, y, width, height) => {
-      if (x !== null && y !== null && width !== null && height !== null) {
-        callback({ x, y, width, height });
-      }
-    });
-  } catch (error) {
-    console.warn('Failed to measure view:', error);
-  }
-}
-
 export const PlayAreaCardSlot: React.FC<PlayAreaCardSlotProps> = ({
   cardId,
   word,
-  isDragging,
   disabled,
+  hiddenFromLayout,
+  layoutKey,
   showConnector,
   showInsertBefore,
-  fingerX,
-  fingerY,
   onLayoutMeasured,
   onDragStart,
   onDragMove,
@@ -62,24 +59,47 @@ export const PlayAreaCardSlot: React.FC<PlayAreaCardSlotProps> = ({
 }) => {
   const slotRef = useRef<RNView>(null);
 
-  const reportLayout = useCallback(() => {
-    measureViewInWindow(slotRef.current, (rect) => {
-      onLayoutMeasured(cardId, rect);
-    });
-  }, [cardId, onLayoutMeasured]);
+  const reportLayout = useCallback(
+    () => {
+      if (hiddenFromLayout) {
+        return;
+      }
+
+      measureViewInWindow(slotRef.current, (rect) => {
+        onLayoutMeasured(cardId, rect);
+      });
+    },
+    [cardId, hiddenFromLayout, onLayoutMeasured],
+  );
+
+  const handleLayout = useCallback(
+    (_event: LayoutChangeEvent) => {
+      reportLayout();
+    },
+    [reportLayout],
+  );
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(reportLayout);
+    return () => cancelAnimationFrame(frame);
+  }, [layoutKey, reportLayout, showConnector, showInsertBefore]);
 
   return (
-    <View style={styles.playItem}>
-      {showInsertBefore && <View style={styles.insertPreview} />}
-      {showConnector && <View style={styles.connector} />}
-      <View ref={slotRef} onLayout={reportLayout} collapsable={false}>
+    <View
+      ref={slotRef}
+      style={[styles.playItem, hiddenFromLayout && styles.hiddenDragSource]}
+      onLayout={handleLayout}
+    >
+      {!hiddenFromLayout && showInsertBefore && (
+        <View style={styles.insertPreview} />
+      )}
+      {!hiddenFromLayout && showConnector && <View style={styles.connector} />}
+      <View collapsable={false}>
         <DraggableWordCard
           cardId={cardId}
           word={word}
-          isDragging={isDragging}
           disabled={disabled}
-          fingerX={fingerX}
-          fingerY={fingerY}
+          hidden={hiddenFromLayout}
           onDragStart={onDragStart}
           onDragMove={onDragMove}
           onDragEnd={onDragEnd}
@@ -103,10 +123,20 @@ const styles = StyleSheet.create({
     backgroundColor: '#7986cb',
     borderRadius: 2,
     height: 4,
-    marginVertical: 4,
+    position: 'absolute',
+    top: -8,
     width: 120,
+    zIndex: 2,
+  },
+  hiddenDragSource: {
+    height: 0,
+    opacity: 0,
+    overflow: 'hidden',
+    position: 'absolute',
+    width: 0,
   },
   playItem: {
     alignItems: 'center',
+    position: 'relative',
   },
 });

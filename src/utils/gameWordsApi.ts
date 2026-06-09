@@ -10,19 +10,20 @@ const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
 interface FetchWordsOptions {
   retries?: number;
   timeoutMs?: number;
+  wordCount?: number;
 }
 
 /**
  * Fetch game words from the backend
- * Always returns 5 words
+ * Returns the requested supported word count.
  * Throws if the backend cannot provide words
  */
 export async function fetchGameWords(
   options: FetchWordsOptions = {},
 ): Promise<GameWordsResponse> {
-  const { retries = 1, timeoutMs = 10000 } = options;
+  const { retries = 1, timeoutMs = 10000, wordCount = 5 } = options;
 
-  const url = `${API_BASE_URL}/api/game/words`;
+  const url = `${API_BASE_URL}/api/game/words?wordCount=${wordCount}`;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {

@@ -1,4 +1,4 @@
-import { WORD_CHAIN_PROMPT } from './prompts/wordChainPrompt';
+import { createWordChainPrompt } from './prompts/wordChainPrompt';
 import { DailyWordStore } from './dailyWordStore';
 
 export interface WordItem {
@@ -10,6 +10,7 @@ export interface GeneratedWordsResponse {
   words: WordItem[];
   answer: string[];
   answerKey: string[];
+  wordCount: number;
   api?: {
     request?: ApiRequestInfo;
     generation: GenerationInfo;
@@ -74,7 +75,8 @@ class ProviderApiError extends Error {
   }
 }
 
-const WORD_COUNT = 5;
+const SUPPORTED_WORD_COUNTS = [5, 7, 9] as const;
+type SupportedWordCount = (typeof SUPPORTED_WORD_COUNTS)[number];
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 const DEFAULT_OPENAI_MODEL = 'gpt-4.1-mini';
 const API_KEY_PLACEHOLDERS = new Set([
@@ -84,16 +86,18 @@ const API_KEY_PLACEHOLDERS = new Set([
 ]);
 
 const FALLBACK_WORD_CHAINS: string[][] = [
-  ['spark', 'flame', 'candle', 'wax', 'seal'],
-  ['seed', 'plant', 'garden', 'fence', 'gate'],
-  ['thread', 'needle', 'fabric', 'curtain', 'window'],
-  ['key', 'lock', 'door', 'room', 'echo'],
-  ['rain', 'umbrella', 'handle', 'lever', 'machine'],
-  ['paper', 'letter', 'mailbox', 'street', 'map'],
-  ['brush', 'paint', 'canvas', 'frame', 'wall'],
+  ['spark', 'flame', 'candle', 'wax', 'seal', 'stamp', 'mail', 'letter', 'paper', 'book'],
+  ['seed', 'plant', 'garden', 'fence', 'gate', 'hinge', 'door', 'room', 'echo', 'sound'],
+  ['thread', 'needle', 'fabric', 'curtain', 'window', 'glass', 'mirror', 'reflection', 'light', 'shadow'],
+  ['rain', 'umbrella', 'handle', 'lever', 'machine', 'gear', 'clock', 'hour', 'schedule', 'calendar'],
+  ['brush', 'paint', 'canvas', 'frame', 'wall', 'brick', 'chimney', 'smoke', 'signal', 'flag'],
 ];
 
-const DISPLAY_ORDER = [2, 0, 4, 1, 3] as const;
+const DISPLAY_ORDERS: Record<SupportedWordCount, number[]> = {
+  5: [2, 0, 4, 1, 3],
+  7: [3, 0, 5, 1, 6, 2, 4],
+  9: [4, 0, 7, 2, 8, 1, 6, 3, 5],
+};
 
 export class WordGenerationService {
   private apiKey: string | null;
@@ -117,15 +121,20 @@ export class WordGenerationService {
     this.apiKey = apiKey;
   }
 
-  async generateWords(): Promise<GeneratedWordsResponse> {
+  async generateWords(wordCount: number): Promise<GeneratedWordsResponse> {
+    const requestedWordCount = this.normalizeWordCount(wordCount);
     const currentPacificDate = this.getPacificDateKey();
-    const cachedWords = await this.dailyWordStore.getCurrent(currentPacificDate);
+    const cachedWords = await this.dailyWordStore.getCurrent(
+      currentPacificDate,
+      requestedWordCount,
+    );
 
     if (cachedWords) {
       return {
         words: cachedWords.words,
         answer: cachedWords.answer,
         answerKey: cachedWords.answerKey,
+        wordCount: cachedWords.wordCount,
         api: {
           generation: {
             provider: 'local',
@@ -142,13 +151,13 @@ export class WordGenerationService {
         source: 'fallback',
         durationMs: 0,
         fallbackReason: 'missing_openai_api_key',
-      });
-      await this.saveDailyWords(currentPacificDate, response);
+      }, requestedWordCount);
+      await this.saveDailyWords(currentPacificDate, requestedWordCount, response);
       return response;
     }
 
     const startedAt = Date.now();
-    const prompt = this.createPrompt();
+    const prompt = this.createPrompt(requestedWordCount);
     const baseGenerationInfo = {
       provider: 'openai' as const,
       model: this.model,
@@ -187,24 +196,24 @@ export class WordGenerationService {
 
       console.log('Generated text:', text);
 
-      const wordStrings = this.parseWordChainResponse(text).answer;
+      const wordStrings = this.parseWordChainResponse(text, requestedWordCount).answer;
 
-      if (wordStrings.length < WORD_COUNT) {
+      if (wordStrings.length < requestedWordCount) {
         console.warn(
-          `Expected ${WORD_COUNT} words but got ${wordStrings.length}. Using fallback words. Response: ${text}`,
+          `Expected ${requestedWordCount} words but got ${wordStrings.length}. Using fallback words. Response: ${text}`,
         );
         const fallbackResponse = this.createFallbackResponse({
           ...baseGenerationInfo,
           source: 'fallback',
           durationMs: Date.now() - startedAt,
           fallbackReason: 'provider_returned_too_few_words',
-        });
-        await this.saveDailyWords(currentPacificDate, fallbackResponse);
+        }, requestedWordCount);
+        await this.saveDailyWords(currentPacificDate, requestedWordCount, fallbackResponse);
         return fallbackResponse;
       }
 
       const generatedResponse: GeneratedWordsResponse = {
-        ...this.toGameWords(wordStrings),
+        ...this.toGameWords(wordStrings, requestedWordCount),
         api: {
           generation: {
             ...baseGenerationInfo,
@@ -213,7 +222,7 @@ export class WordGenerationService {
           },
         },
       };
-      await this.saveDailyWords(currentPacificDate, generatedResponse);
+      await this.saveDailyWords(currentPacificDate, requestedWordCount, generatedResponse);
       return generatedResponse;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -244,14 +253,20 @@ export class WordGenerationService {
           ? 'provider_network_error'
           : 'provider_error',
         error: errorInfo,
-      });
-      await this.saveDailyWords(currentPacificDate, fallbackResponse);
+      }, requestedWordCount);
+      await this.saveDailyWords(currentPacificDate, requestedWordCount, fallbackResponse);
       return fallbackResponse;
     }
   }
 
-  private createPrompt(): string {
-    return WORD_CHAIN_PROMPT;
+  private normalizeWordCount(wordCount: number): SupportedWordCount {
+    return SUPPORTED_WORD_COUNTS.includes(wordCount as SupportedWordCount)
+      ? (wordCount as SupportedWordCount)
+      : 5;
+  }
+
+  private createPrompt(wordCount: SupportedWordCount): string {
+    return createWordChainPrompt(wordCount);
   }
 
   private getPacificDateKey(date = new Date()): string {
@@ -268,10 +283,12 @@ export class WordGenerationService {
 
   private async saveDailyWords(
     date: string,
+    wordCount: SupportedWordCount,
     response: GeneratedWordsResponse,
   ): Promise<void> {
     await this.dailyWordStore.save({
       date,
+      wordCount,
       words: response.words,
       answer: response.answer,
       answerKey: response.answerKey,
@@ -393,12 +410,15 @@ export class WordGenerationService {
     );
   }
 
-  private parseWordChainResponse(text: string): WordChainResponse {
+  private parseWordChainResponse(
+    text: string,
+    wordCount: SupportedWordCount,
+  ): WordChainResponse {
     const parsed = this.parseJsonObject(text) as Partial<WordChainResponse> | null;
     const answer = Array.isArray(parsed?.answer)
       ? parsed.answer.map((word) => String(word))
       : this.parseWords(text);
-    const normalizedAnswer = this.normalizeWords(answer);
+    const normalizedAnswer = this.normalizeWords(answer, wordCount);
 
     return {
       answer: normalizedAnswer,
@@ -428,29 +448,32 @@ export class WordGenerationService {
       .split(/,|\n|->|\u2192/)
       .map((word) => word.replace(/^\s*[-*\d.)]+\s*/, '').replace(/^["']|["']$/g, ''));
 
-    return this.normalizeWords(words);
+    return this.normalizeWords(words, 9);
   }
 
-  private normalizeWords(words: string[]): string[] {
+  private normalizeWords(words: string[], wordCount: SupportedWordCount): string[] {
     const normalizedWords = words
       .map((word) => word.trim().toLowerCase())
       .filter((word) => /^[a-z][a-z'-]{1,18}$/.test(word));
 
-    return Array.from(new Set(normalizedWords)).slice(0, WORD_COUNT);
+    return Array.from(new Set(normalizedWords)).slice(0, wordCount);
   }
 
-  private createFallbackResponse(generation: GenerationInfo): GeneratedWordsResponse {
+  private createFallbackResponse(
+    generation: GenerationInfo,
+    wordCount: SupportedWordCount,
+  ): GeneratedWordsResponse {
     return {
-      ...this.toGameWords(this.getFallbackWords()),
+      ...this.toGameWords(this.getFallbackWords(wordCount), wordCount),
       api: {
         generation,
       },
     };
   }
 
-  private getFallbackWords(): string[] {
+  private getFallbackWords(wordCount: SupportedWordCount): string[] {
     const randomIndex = Math.floor(Math.random() * FALLBACK_WORD_CHAINS.length);
-    return FALLBACK_WORD_CHAINS[randomIndex];
+    return FALLBACK_WORD_CHAINS[randomIndex].slice(0, wordCount);
   }
 
   private toWordItems(wordStrings: string[]): WordItem[] {
@@ -460,10 +483,13 @@ export class WordGenerationService {
     }));
   }
 
-  private toGameWords(answer: string[]): Pick<GeneratedWordsResponse, 'words' | 'answer' | 'answerKey'> {
+  private toGameWords(
+    answer: string[],
+    wordCount: SupportedWordCount,
+  ): Pick<GeneratedWordsResponse, 'words' | 'answer' | 'answerKey' | 'wordCount'> {
     const orderedWords = this.toWordItems(answer);
     const answerKey = orderedWords.map((word) => word.id);
-    const words = DISPLAY_ORDER.map((index) => orderedWords[index]).filter(
+    const words = DISPLAY_ORDERS[wordCount].map((index) => orderedWords[index]).filter(
       (word): word is WordItem => Boolean(word),
     );
 
@@ -471,6 +497,7 @@ export class WordGenerationService {
       words,
       answer,
       answerKey,
+      wordCount,
     };
   }
 }

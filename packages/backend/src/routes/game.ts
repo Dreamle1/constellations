@@ -21,16 +21,19 @@ function getWordService(): WordGenerationService {
 router.get(
   '/words',
   async (
-    _req: Request<Record<string, never>, GeneratedWordsResponse>,
+    req: Request<Record<string, never>, GeneratedWordsResponse>,
     res: Response<GeneratedWordsResponse>,
   ) => {
     try {
+      const wordCount = Number(req.query.wordCount ?? 5);
+
       console.log('[API REQUEST]');
       console.log('  Method: GET');
       console.log('  Endpoint: /api/game/words');
+      console.log('  Word Count:', wordCount);
       console.log('  Timestamp:', new Date().toISOString());
 
-      const response = await getWordService().generateWords();
+      const response = await getWordService().generateWords(wordCount);
 
       console.log('[API RESPONSE]');
       console.log('  Status: 200 OK');
@@ -48,6 +51,7 @@ router.get(
         words: [],
         answer: [],
         answerKey: [],
+        wordCount: 5,
       });
     }
   },

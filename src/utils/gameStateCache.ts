@@ -1,21 +1,31 @@
 import type { GamePhase, WordCardModel } from '@/types/cards';
 
 const GAME_STATE_CACHE_KEY = 'constellations:game-state:v1';
-const GAME_STATE_CACHE_VERSION = 1;
+const GAME_STATE_CACHE_VERSION = 7;
 
 interface StorageLike {
   getItem: (key: string) => string | null;
   setItem: (key: string, value: string) => void;
 }
 
-export interface CachedGameState {
-  version: typeof GAME_STATE_CACHE_VERSION;
+export interface CachedCompletedLevelState {
+  levelIndex: number;
   cards: WordCardModel[];
   answerKey: string[];
   fieldIds: string[];
   playIds: string[];
   gamePhase: GamePhase;
   submitTries: number;
+  playAreaFlipped: boolean;
+}
+
+export interface CachedGameState extends CachedCompletedLevelState {
+  version: typeof GAME_STATE_CACHE_VERSION;
+  gamePhase: GamePhase;
+  currentLevelIndex: number;
+  unlockedLevelIndex: number;
+  completedLevelIndexes: number[];
+  completedLevelStates: CachedCompletedLevelState[];
 }
 
 function getStorage(): StorageLike | null {
@@ -42,22 +52,25 @@ function isGamePhase(value: unknown): value is GamePhase {
   return value === 'playing' || value === 'success' || value === 'failed';
 }
 
-function normalizeCachedState(value: unknown): CachedGameState | null {
+function normalizeCompletedLevelState(
+  value: unknown,
+): CachedCompletedLevelState | null {
   if (!value || typeof value !== 'object') {
     return null;
   }
 
-  const candidate = value as Partial<CachedGameState>;
+  const candidate = value as Partial<CachedCompletedLevelState>;
 
   if (
-    candidate.version !== GAME_STATE_CACHE_VERSION ||
+    typeof candidate.levelIndex !== 'number' ||
     !Array.isArray(candidate.cards) ||
     !candidate.cards.every(isWordCard) ||
     !isStringArray(candidate.answerKey) ||
     !isStringArray(candidate.fieldIds) ||
     !isStringArray(candidate.playIds) ||
     !isGamePhase(candidate.gamePhase) ||
-    typeof candidate.submitTries !== 'number'
+    typeof candidate.submitTries !== 'number' ||
+    typeof candidate.playAreaFlipped !== 'boolean'
   ) {
     return null;
   }
@@ -75,13 +88,47 @@ function normalizeCachedState(value: unknown): CachedGameState | null {
   }
 
   return {
-    version: GAME_STATE_CACHE_VERSION,
+    levelIndex: Math.max(0, Math.floor(candidate.levelIndex)),
     cards: candidate.cards,
     answerKey: candidate.answerKey,
     fieldIds: candidate.fieldIds,
     playIds: candidate.playIds,
     gamePhase: candidate.gamePhase,
     submitTries: Math.max(0, Math.floor(candidate.submitTries)),
+    playAreaFlipped: candidate.playAreaFlipped,
+  };
+}
+
+function normalizeCachedState(value: unknown): CachedGameState | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const candidate = value as Partial<CachedGameState>;
+  const currentLevelState = normalizeCompletedLevelState(candidate);
+
+  if (
+    candidate.version !== GAME_STATE_CACHE_VERSION ||
+    !currentLevelState ||
+    typeof candidate.currentLevelIndex !== 'number' ||
+    typeof candidate.unlockedLevelIndex !== 'number' ||
+    !Array.isArray(candidate.completedLevelIndexes) ||
+    !Array.isArray(candidate.completedLevelStates)
+  ) {
+    return null;
+  }
+
+  return {
+    version: GAME_STATE_CACHE_VERSION,
+    ...currentLevelState,
+    currentLevelIndex: Math.max(0, Math.floor(candidate.currentLevelIndex)),
+    unlockedLevelIndex: Math.max(0, Math.floor(candidate.unlockedLevelIndex)),
+    completedLevelIndexes: candidate.completedLevelIndexes
+      .filter((index): index is number => typeof index === 'number')
+      .map((index) => Math.max(0, Math.floor(index))),
+    completedLevelStates: candidate.completedLevelStates
+      .map((state) => normalizeCompletedLevelState(state))
+      .filter((state): state is CachedCompletedLevelState => Boolean(state)),
   };
 }
 

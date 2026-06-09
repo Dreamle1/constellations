@@ -17,5 +17,10 @@ export interface DragState {
   fromZone: Zone;
   fromFieldIndex?: number;
   fromPlayIndex?: number;
-  pointerToCardCenterOffsetY: number;
+  grabOffsetX: number;
+  grabOffsetY: number;
+  pointerX: number;
+  pointerY: number;
+  dragLayerX: number;
+  dragLayerY: number;
 }

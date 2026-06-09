@@ -14,7 +14,7 @@ const COPY: Record<GameBannerVariant, { title: string; subtitle: string }> = {
   },
   failed: {
     title: 'Out of tries',
-    subtitle: 'Press Reset to try again.',
+    subtitle: 'This constellation has faded.',
   },
 };
 

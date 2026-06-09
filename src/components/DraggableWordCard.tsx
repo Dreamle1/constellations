@@ -1,11 +1,17 @@
-import React, { useCallback, useMemo, useRef } from 'react';
-import { View, type View as RNView } from 'react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { runOnJS, type SharedValue } from 'react-native-reanimated';
+import React, { useMemo, useRef } from 'react';
+import {
+  PanResponder,
+  View,
+  type GestureResponderEvent,
+  type PanResponderGestureState,
+  type View as RNView,
+} from 'react-native';
 
 import type { LayoutRect } from '@/types/cards';
 
 import { WordCard } from './WordCard';
+
+const DRAG_THRESHOLD = 4;
 
 function measureViewInWindow(
   view: RNView | null,
@@ -14,24 +20,42 @@ function measureViewInWindow(
   if (!view) {
     return;
   }
-  try {
-    view.measureInWindow((x, y, width, height) => {
-      if (x !== null && y !== null && width !== null && height !== null) {
-        callback({ x, y, width, height });
-      }
-    });
-  } catch (error) {
-    console.warn('Failed to measure view:', error);
-  }
+
+  view.measureInWindow((x, y, width, height) => {
+    callback({ x, y, width, height });
+  });
+}
+
+function getGesturePoint(
+  event: GestureResponderEvent,
+  gestureState: PanResponderGestureState,
+) {
+  const pageX = event.nativeEvent.pageX;
+  const pageY = event.nativeEvent.pageY;
+  const x =
+    typeof gestureState.moveX === 'number' && gestureState.moveX > 0
+      ? gestureState.moveX
+      : pageX;
+  const y =
+    typeof gestureState.moveY === 'number' && gestureState.moveY > 0
+      ? gestureState.moveY
+      : pageY;
+
+  return { x, y };
+}
+
+function shouldStartDrag(gestureState: PanResponderGestureState) {
+  return (
+    Math.abs(gestureState.dx) > DRAG_THRESHOLD ||
+    Math.abs(gestureState.dy) > DRAG_THRESHOLD
+  );
 }
 
 interface DraggableWordCardProps {
   cardId: string;
   word: string;
-  isDragging?: boolean;
   disabled?: boolean;
-  fingerX: SharedValue<number>;
-  fingerY: SharedValue<number>;
+  hidden?: boolean;
   onDragStart: (
     cardId: string,
     x: number,
@@ -46,119 +70,90 @@ interface DraggableWordCardProps {
 export const DraggableWordCard: React.FC<DraggableWordCardProps> = ({
   cardId,
   word,
-  isDragging,
   disabled = false,
-  fingerX,
-  fingerY,
+  hidden,
   onDragStart,
   onDragMove,
   onDragEnd,
   onPress,
 }) => {
   const cardRef = useRef<RNView>(null);
+  const activeDragRef = useRef(false);
   const cardIdRef = useRef(cardId);
-  const gestureActiveRef = useRef(false);
-  const dragStartTokenRef = useRef(0);
+  const pendingCardRectRef = useRef<LayoutRect | null>(null);
+  const pendingStartPointRef = useRef<{ x: number; y: number } | null>(null);
   cardIdRef.current = cardId;
 
-  const syncFinger = useCallback(
-    (x: number, y: number) => {
-      fingerX.value = x;
-      fingerY.value = y;
-    },
-    [fingerX, fingerY],
+  const resetDragRefs = () => {
+    activeDragRef.current = false;
+    pendingCardRectRef.current = null;
+    pendingStartPointRef.current = null;
+  };
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => !disabled,
+        onStartShouldSetPanResponderCapture: () => !disabled,
+        onMoveShouldSetPanResponder: () => !disabled,
+        onMoveShouldSetPanResponderCapture: () => !disabled,
+        onPanResponderGrant: (event, gestureState) => {
+          resetDragRefs();
+          const point = getGesturePoint(event, gestureState);
+          pendingStartPointRef.current = point;
+
+          measureViewInWindow(cardRef.current, (cardRect) => {
+            pendingCardRectRef.current = cardRect;
+          });
+        },
+        onPanResponderMove: (event, gestureState) => {
+          const point = getGesturePoint(event, gestureState);
+
+          if (!activeDragRef.current && shouldStartDrag(gestureState)) {
+            const cardRect = pendingCardRectRef.current;
+            if (!cardRect) {
+              return;
+            }
+
+            activeDragRef.current = true;
+            onDragStart(cardIdRef.current, point.x, point.y, cardRect);
+          }
+
+          if (!activeDragRef.current) {
+            return;
+          }
+
+          onDragMove(cardIdRef.current, point.x, point.y);
+        },
+        onPanResponderRelease: (event, gestureState) => {
+          const point = getGesturePoint(event, gestureState);
+
+          if (!activeDragRef.current) {
+            resetDragRefs();
+            if (!shouldStartDrag(gestureState)) {
+              onPress?.(cardIdRef.current);
+            }
+            return;
+          }
+
+          onDragEnd(cardIdRef.current, point.x, point.y);
+          resetDragRefs();
+        },
+        onPanResponderTerminate: () => {
+          resetDragRefs();
+        },
+        onPanResponderTerminationRequest: () => false,
+      }),
+    [disabled, onDragEnd, onDragMove, onDragStart, onPress],
   );
-
-  const measureAndStart = useCallback(
-    (absoluteX: number, absoluteY: number) => {
-      if (disabled) {
-        return;
-      }
-
-      gestureActiveRef.current = true;
-      const dragStartToken = dragStartTokenRef.current + 1;
-      dragStartTokenRef.current = dragStartToken;
-
-      measureViewInWindow(cardRef.current, (cardRect) => {
-        if (
-          !gestureActiveRef.current ||
-          dragStartTokenRef.current !== dragStartToken
-        ) {
-          return;
-        }
-
-        onDragStart(cardIdRef.current, absoluteX, absoluteY, cardRect);
-      });
-    },
-    [disabled, onDragStart],
-  );
-
-  const handleDragMove = useCallback(
-    (absoluteX: number, absoluteY: number) => {
-      syncFinger(absoluteX, absoluteY);
-      onDragMove(cardIdRef.current, absoluteX, absoluteY);
-    },
-    [onDragMove, syncFinger],
-  );
-
-  const handleDragEnd = useCallback(
-    (absoluteX: number, absoluteY: number) => {
-      gestureActiveRef.current = false;
-      syncFinger(absoluteX, absoluteY);
-      onDragEnd(cardIdRef.current, absoluteX, absoluteY);
-    },
-    [onDragEnd, syncFinger],
-  );
-
-  const gesture = useMemo(() => {
-    const panGesture = Gesture.Pan()
-      .enabled(!disabled)
-      .minDistance(4)
-      .onStart((event) => {
-        try {
-          const x = event.absoluteX ?? event.x;
-          const y = event.absoluteY ?? event.y;
-          runOnJS(measureAndStart)(x, y);
-        } catch (error) {
-          console.error('Error in drag start:', error, (error as Error).message);
-        }
-      })
-      .onUpdate((event) => {
-        try {
-          const x = event.absoluteX ?? event.x;
-          const y = event.absoluteY ?? event.y;
-          runOnJS(handleDragMove)(x, y);
-        } catch (error) {
-          console.error('Error in drag move:', error, (error as Error).message);
-        }
-      })
-      .onEnd((event) => {
-        try {
-          const x = event.absoluteX ?? event.x;
-          const y = event.absoluteY ?? event.y;
-          runOnJS(handleDragEnd)(x, y);
-        } catch (error) {
-          console.error('Error in drag end:', error, (error as Error).message);
-        }
-      });
-
-    const tapGesture = Gesture.Tap()
-      .enabled(!disabled && !!onPress)
-      .maxDistance(8)
-      .onEnd((_event, success) => {
-        if (success && onPress) {
-          runOnJS(onPress)(cardIdRef.current);
-        }
-      });
-
-    return Gesture.Race(panGesture, tapGesture);
-  }, [disabled, handleDragEnd, handleDragMove, measureAndStart, onPress]);
 
   return (
-    <GestureDetector gesture={gesture}>
-      <View ref={cardRef} collapsable={false}>
-        <WordCard cardId={cardId} word={word} ghost={isDragging} />
-      </View>
-    </GestureDetector>
+    <View
+      ref={cardRef}
+      collapsable={false}
+      {...panResponder.panHandlers}
+    >
+      {!hidden && <WordCard cardId={cardId} word={word} />}
+    </View>
   );
 };
