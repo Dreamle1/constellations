@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: constellations-backend
+    runtime: node
+    plan: free
+    buildCommand: npm ci --include=dev && npm run backend:build
+    startCommand: npm run backend:start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: OPENAI_MODEL
+        value: gpt-4.1-mini
+      - key: OPENAI_API_KEY
+        sync: false

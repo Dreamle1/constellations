@@ -18,6 +18,7 @@
     "submit:android": "eas submit --platform android --profile production",
     "backend:dev": "cd packages/backend && npm run dev",
     "backend:build": "cd packages/backend && npm run build",
+    "backend:start": "cd packages/backend && npm run start",
     "dev:all": "concurrently \"npm run dev\" \"npm run backend:dev\"",
     "test": "jest",
     "type-check": "tsc --noEmit && cd packages/backend && npm run type-check && cd ../shared && npm run type-check",
