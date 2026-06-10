@@ -10,7 +10,6 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@huggingface/inference": "^2.6.4",
     "@constellations/shared": "file:../shared",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
