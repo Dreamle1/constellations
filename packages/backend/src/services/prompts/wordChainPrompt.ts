@@ -1,3 +1,16 @@
+import { readFileSync } from 'fs';
+import path from 'path';
+
+const PROMPT_TEMPLATE_PATH = path.resolve(__dirname, '..', 'prompt');
+
+function readPromptTemplate(): string {
+  return readFileSync(PROMPT_TEMPLATE_PATH, 'utf8').trim();
+}
+
+function replaceToken(template: string, token: string, value: string): string {
+  return template.split(token).join(value);
+}
+
 export function createWordChainPrompt(wordCount: number): string {
   const wordLabels = Array.from(
     { length: wordCount },
@@ -18,22 +31,11 @@ export function createWordChainPrompt(wordCount: number): string {
     { length: wordCount },
     (_, index) => `"word${index + 1}"`,
   ).join(', ');
-  const answerKeyExample = Array.from(
-    { length: wordCount },
-    (_, index) => index + 1,
-  ).join(', ');
 
-  return `Generate ${wordCount} words arranged in a linear chain (${chain}) where each word is related only to its immediate neighbors in the sequence. Specifically:
-
-${relationships}
-
-Ensure there are no meaningful semantic or obvious associations between non-adjacent words. For example, Word 1 should have no clear relation to Word 3 or any later word, and each middle word should only clearly connect to the word immediately before it and immediately after it. The relationships between adjacent words should be clear and defensible (categorical, functional, or contextual).
-
-Return only valid JSON in this exact shape:
-{
-  "answer": [${answerExample}],
-  "answerKey": [${answerKeyExample}]
-}
-
-The answer array must contain exactly ${wordCount} unique lowercase words in the correct chain order. The answerKey array must identify that same order by 1-based answer positions. Do not include explanations, markdown, numbering outside JSON, or extra keys.`;
+  let prompt = readPromptTemplate();
+  prompt = replaceToken(prompt, '{{wordCount}}', String(wordCount));
+  prompt = replaceToken(prompt, '{{chain}}', chain);
+  prompt = replaceToken(prompt, '{{relationships}}', relationships);
+  prompt = replaceToken(prompt, '{{answerExample}}', answerExample);
+  return prompt;
 }

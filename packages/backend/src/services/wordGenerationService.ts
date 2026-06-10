@@ -59,9 +59,8 @@ interface OpenAIResponse {
   };
 }
 
-interface WordChainResponse {
+interface WordChainProviderResponse {
   answer: string[];
-  answerKey: string[];
 }
 
 class ProviderApiError extends Error {
@@ -131,10 +130,7 @@ export class WordGenerationService {
 
     if (cachedWords) {
       return {
-        words: cachedWords.words,
-        answer: cachedWords.answer,
-        answerKey: cachedWords.answerKey,
-        wordCount: cachedWords.wordCount,
+        ...this.toGameWords(cachedWords.answer, requestedWordCount),
         api: {
           generation: {
             provider: 'local',
@@ -179,8 +175,6 @@ export class WordGenerationService {
         },
         body: JSON.stringify({
           model: this.model,
-          instructions:
-            'You generate short, playable word-card content. Return only valid JSON that matches the requested schema.',
           input: prompt,
           max_output_tokens: 220,
         }),
@@ -196,7 +190,7 @@ export class WordGenerationService {
 
       console.log('Generated text:', text);
 
-      const wordStrings = this.parseWordChainResponse(text, requestedWordCount).answer;
+      const wordStrings = this.parseWordChainAnswer(text, requestedWordCount);
 
       if (wordStrings.length < requestedWordCount) {
         console.warn(
@@ -289,9 +283,7 @@ export class WordGenerationService {
     await this.dailyWordStore.save({
       date,
       wordCount,
-      words: response.words,
       answer: response.answer,
-      answerKey: response.answerKey,
       createdAt: new Date().toISOString(),
     });
   }
@@ -410,20 +402,16 @@ export class WordGenerationService {
     );
   }
 
-  private parseWordChainResponse(
+  private parseWordChainAnswer(
     text: string,
     wordCount: SupportedWordCount,
-  ): WordChainResponse {
-    const parsed = this.parseJsonObject(text) as Partial<WordChainResponse> | null;
+  ): string[] {
+    const parsed = this.parseJsonObject(text) as Partial<WordChainProviderResponse> | null;
     const answer = Array.isArray(parsed?.answer)
       ? parsed.answer.map((word) => String(word))
       : this.parseWords(text);
-    const normalizedAnswer = this.normalizeWords(answer, wordCount);
 
-    return {
-      answer: normalizedAnswer,
-      answerKey: normalizedAnswer.map((_, index) => `card-${index}`),
-    };
+    return this.normalizeWords(answer, wordCount);
   }
 
   private parseJsonObject(text: string): unknown | null {

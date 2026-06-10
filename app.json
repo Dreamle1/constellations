@@ -22,7 +22,8 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.constellations.app"
+      "package": "com.constellationsGame.app",
+      "versionCode": 1
     },
     "web": {
       "favicon": "./assets/favicon.png",

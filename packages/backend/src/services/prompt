@@ -1,0 +1,14 @@
+Generate {{wordCount}} words arranged in a linear chain ({{chain}}) where each word is related only to its immediate neighbors in the sequence. Specifically:
+
+{{relationships}}
+
+Ensure there are no meaningful semantic or obvious associations between non-adjacent words. For example, Word 1 should have no clear relation to Word 3 or any later word, and each middle word should only clearly connect to the word immediately before it and immediately after it. The relationships between adjacent words should be clear and defensible (categorical, functional, or contextual).
+
+Choose words that are a bit more interesting and complex when possible, while still being familiar, playable, and easy to spell. Prefer evocative nouns, concrete concepts, and slightly richer vocabulary over generic words, but avoid obscure, technical, proper, or multi-word answers.
+
+Return only valid JSON in this exact shape:
+{
+  "answer": [{{answerExample}}]
+}
+
+The answer array must contain exactly {{wordCount}} unique lowercase words in the correct chain order. Do not include explanations, markdown, numbering outside JSON, or extra keys.

@@ -1,14 +1,10 @@
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
 
-import type { WordItem } from './wordGenerationService';
-
 export interface StoredDailyWords {
   date: string;
   wordCount: number;
-  words: WordItem[];
   answer: string[];
-  answerKey: string[];
   createdAt: string;
 }
 
@@ -29,7 +25,7 @@ export class DailyWordStore {
       (item) =>
         item.date === date &&
         item.wordCount === wordCount &&
-        item.words.length === wordCount,
+        item.answer.length === wordCount,
     );
 
     if (!entry) {
@@ -85,27 +81,19 @@ export class DailyWordStore {
     const parsed = value as Partial<StoredDailyWords>;
     if (
       typeof parsed.date !== 'string' ||
-      !Array.isArray(parsed.words) ||
       !Array.isArray(parsed.answer) ||
-      !Array.isArray(parsed.answerKey) ||
       typeof parsed.createdAt !== 'string'
     ) {
       return null;
     }
 
-    const words = parsed.words.filter(
-      (item): item is WordItem =>
-        typeof item?.id === 'string' && typeof item.word === 'string',
-    );
     const wordCount =
-      typeof parsed.wordCount === 'number' ? parsed.wordCount : words.length;
+      typeof parsed.wordCount === 'number' ? parsed.wordCount : parsed.answer.length;
 
     return {
       date: parsed.date,
       wordCount,
-      words,
       answer: parsed.answer.filter((word): word is string => typeof word === 'string'),
-      answerKey: parsed.answerKey.filter((id): id is string => typeof id === 'string'),
       createdAt: parsed.createdAt,
     };
   }

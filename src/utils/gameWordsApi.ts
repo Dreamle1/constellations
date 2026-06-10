@@ -5,7 +5,16 @@
 
 import type { GameWordsResponse } from '@constellations/shared';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+const API_BASE_URL =
+  process.env.EXPO_PUBLIC_API_URL || (__DEV__ ? 'http://localhost:3001' : '');
+
+function getApiBaseUrl(): string {
+  if (!API_BASE_URL) {
+    throw new Error('EXPO_PUBLIC_API_URL is required for production builds');
+  }
+
+  return API_BASE_URL.replace(/\/$/, '');
+}
 
 interface FetchWordsOptions {
   retries?: number;
@@ -23,7 +32,7 @@ export async function fetchGameWords(
 ): Promise<GameWordsResponse> {
   const { retries = 1, timeoutMs = 10000, wordCount = 5 } = options;
 
-  const url = `${API_BASE_URL}/api/game/words?wordCount=${wordCount}`;
+  const url = `${getApiBaseUrl()}/api/game/words?wordCount=${wordCount}`;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
