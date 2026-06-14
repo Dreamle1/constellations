@@ -3,6 +3,7 @@ import type { LayoutRect } from '@/types/cards';
 import {
   getDragGrabOffset,
   getFloatingCardPosition,
+  getPathInsertionIndex,
   getPlayInsertionIndex,
   getPlayReorderPreviewIndex,
   moveCardInDisplayOrder,
@@ -71,6 +72,19 @@ describe('getPlayInsertionIndex', () => {
 
   it('appends after the last card', () => {
     expect(getPlayInsertionIndex(250, ['a', 'b'], layouts)).toBe(2);
+  });
+});
+
+describe('getPathInsertionIndex', () => {
+  const layouts = new Map<string, LayoutRect>([
+    ['a', { x: 0, y: 0, width: 80, height: 40 }],
+    ['b', { x: 0, y: 80, width: 80, height: 40 }],
+    ['c', { x: 120, y: 80, width: 80, height: 40 }],
+  ]);
+
+  it('uses both axes when inserting along a bent path', () => {
+    expect(getPathInsertionIndex({ x: 95, y: 100 }, ['a', 'b', 'c'], layouts)).toBe(2);
+    expect(getPathInsertionIndex({ x: 40, y: 10 }, ['a', 'b', 'c'], layouts)).toBe(0);
   });
 });
 

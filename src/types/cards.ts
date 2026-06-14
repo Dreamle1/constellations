@@ -21,6 +21,10 @@ export interface DragState {
   grabOffsetY: number;
   pointerX: number;
   pointerY: number;
+  cardWidth: number;
+  cardHeight: number;
+  cardStartX: number;
+  cardStartY: number;
   dragLayerX: number;
   dragLayerY: number;
 }

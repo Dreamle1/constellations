@@ -38,6 +38,31 @@ function getCardColor(cardId: string | undefined, word: string) {
   return CARD_COLORS[colorIndex % CARD_COLORS.length];
 }
 
+function getWordFontSize(word: string): number {
+  if (word.length >= 10) {
+    return 12;
+  }
+
+  if (word.length >= 8) {
+    return 13;
+  }
+
+  if (word.length >= 7) {
+    return 14;
+  }
+
+  return 16;
+}
+
+function getWordTextStyle(word: string) {
+  const fontSize = getWordFontSize(word);
+
+  return {
+    fontSize,
+    lineHeight: Math.ceil(fontSize * 1.38),
+  };
+}
+
 export const WordCard: React.FC<WordCardProps> = ({
   cardId,
   word,
@@ -60,7 +85,14 @@ export const WordCard: React.FC<WordCardProps> = ({
       accessibilityRole="button"
       accessibilityLabel={word}
     >
-      <Text style={styles.word}>{word}</Text>
+      <Text
+        style={[styles.word, getWordTextStyle(word)]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.5}
+      >
+        {word}
+      </Text>
     </View>
   );
 };
@@ -86,8 +118,10 @@ const styles = StyleSheet.create({
   },
   word: {
     color: '#1a1a2e',
-    fontSize: 16,
     fontWeight: '600',
+    paddingHorizontal: 4,
+    textAlign: 'center',
     textTransform: 'lowercase',
+    width: '100%',
   },
 });

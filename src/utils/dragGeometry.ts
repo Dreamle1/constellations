@@ -61,6 +61,85 @@ export function getPlayInsertionIndex(
   return playIds.length;
 }
 
+export function getPathInsertionIndex(
+  pointer: Point,
+  playIds: string[],
+  itemLayouts: Map<string, LayoutRect>,
+): number {
+  if (playIds.length === 0) {
+    return 0;
+  }
+
+  const measuredItems = playIds
+    .map((id, index) => {
+      const layout = itemLayouts.get(id);
+      return layout
+        ? {
+            index,
+            centerX: layout.x + layout.width / 2,
+            centerY: layout.y + layout.height / 2,
+          }
+        : null;
+    })
+    .filter(
+      (
+        item,
+      ): item is { index: number; centerX: number; centerY: number } =>
+        Boolean(item),
+    );
+
+  if (measuredItems.length === 0) {
+    return playIds.length;
+  }
+
+  const boundaries = Array.from({ length: playIds.length + 1 }, (_, index) => {
+    const previous = measuredItems.find((item) => item.index === index - 1);
+    const next = measuredItems.find((item) => item.index === index);
+
+    if (previous && next) {
+      return {
+        index,
+        x: (previous.centerX + next.centerX) / 2,
+        y: (previous.centerY + next.centerY) / 2,
+      };
+    }
+
+    if (next) {
+      const afterNext = measuredItems.find((item) => item.index === index + 1);
+      return {
+        index,
+        x: next.centerX - ((afterNext?.centerX ?? next.centerX) - next.centerX) / 2,
+        y: next.centerY - ((afterNext?.centerY ?? next.centerY) - next.centerY) / 2,
+      };
+    }
+
+    if (previous) {
+      const beforePrevious = measuredItems.find((item) => item.index === index - 2);
+      return {
+        index,
+        x:
+          previous.centerX +
+          (previous.centerX - (beforePrevious?.centerX ?? previous.centerX)) / 2,
+        y:
+          previous.centerY +
+          (previous.centerY - (beforePrevious?.centerY ?? previous.centerY)) / 2,
+      };
+    }
+
+    return null;
+  }).filter((boundary): boundary is { index: number; x: number; y: number } =>
+    Boolean(boundary),
+  );
+
+  return boundaries.reduce(
+    (closest, boundary) => {
+      const distance = Math.hypot(pointer.x - boundary.x, pointer.y - boundary.y);
+      return distance < closest.distance ? { index: boundary.index, distance } : closest;
+    },
+    { index: playIds.length, distance: Number.POSITIVE_INFINITY },
+  ).index;
+}
+
 export function getPlayReorderPreviewIndex(
   pointerY: number,
   displayPlayIds: string[],

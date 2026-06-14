@@ -3,6 +3,7 @@ import {
   LayoutChangeEvent,
   StyleSheet,
   View,
+  type ViewStyle,
   type View as RNView,
 } from 'react-native';
 
@@ -29,6 +30,8 @@ interface PlayAreaCardSlotProps {
   disabled?: boolean;
   hiddenFromLayout?: boolean;
   layoutKey: string;
+  style?: ViewStyle;
+  cardStyle?: ViewStyle;
   showConnector: boolean;
   showInsertBefore: boolean;
   onLayoutMeasured: (cardId: string, rect: LayoutRect) => void;
@@ -49,6 +52,8 @@ export const PlayAreaCardSlot: React.FC<PlayAreaCardSlotProps> = ({
   disabled,
   hiddenFromLayout,
   layoutKey,
+  style,
+  cardStyle,
   showConnector,
   showInsertBefore,
   onLayoutMeasured,
@@ -87,7 +92,7 @@ export const PlayAreaCardSlot: React.FC<PlayAreaCardSlotProps> = ({
   return (
     <View
       ref={slotRef}
-      style={[styles.playItem, hiddenFromLayout && styles.hiddenDragSource]}
+      style={[styles.playItem, style]}
       onLayout={handleLayout}
     >
       {!hiddenFromLayout && showInsertBefore && (
@@ -99,7 +104,7 @@ export const PlayAreaCardSlot: React.FC<PlayAreaCardSlotProps> = ({
           cardId={cardId}
           word={word}
           disabled={disabled}
-          hidden={hiddenFromLayout}
+          cardStyle={cardStyle}
           onDragStart={onDragStart}
           onDragMove={onDragMove}
           onDragEnd={onDragEnd}
@@ -126,15 +131,10 @@ const styles = StyleSheet.create({
     marginVertical: 10,
     width: 120,
   },
-  hiddenDragSource: {
-    height: 0,
-    opacity: 0,
-    overflow: 'hidden',
-    position: 'absolute',
-    width: 0,
-  },
   playItem: {
     alignItems: 'center',
+    elevation: 5,
     position: 'relative',
+    zIndex: 5,
   },
 });
