@@ -1,11 +1,12 @@
 import type { GamePhase, WordCardModel } from '@/types/cards';
 
 const GAME_STATE_CACHE_KEY = 'constellations:game-state:v1';
-const GAME_STATE_CACHE_VERSION = 7;
+export const GAME_STATE_CACHE_VERSION = 8;
 
 interface StorageLike {
   getItem: (key: string) => string | null;
   setItem: (key: string, value: string) => void;
+  removeItem: (key: string) => void;
 }
 
 export interface CachedCompletedLevelState {
@@ -21,6 +22,7 @@ export interface CachedCompletedLevelState {
 
 export interface CachedGameState extends CachedCompletedLevelState {
   version: typeof GAME_STATE_CACHE_VERSION;
+  date: string;
   gamePhase: GamePhase;
   currentLevelIndex: number;
   unlockedLevelIndex: number;
@@ -50,6 +52,18 @@ function isWordCard(value: unknown): value is WordCardModel {
 
 function isGamePhase(value: unknown): value is GamePhase {
   return value === 'playing' || value === 'success' || value === 'failed';
+}
+
+function getPacificDateKey(date = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+
+  const getPart = (type: string) => parts.find((part) => part.type === type)?.value;
+  return `${getPart('year')}-${getPart('month')}-${getPart('day')}`;
 }
 
 function normalizeCompletedLevelState(
@@ -109,6 +123,7 @@ function normalizeCachedState(value: unknown): CachedGameState | null {
 
   if (
     candidate.version !== GAME_STATE_CACHE_VERSION ||
+    candidate.date !== getPacificDateKey() ||
     !currentLevelState ||
     typeof candidate.currentLevelIndex !== 'number' ||
     typeof candidate.unlockedLevelIndex !== 'number' ||
@@ -120,6 +135,7 @@ function normalizeCachedState(value: unknown): CachedGameState | null {
 
   return {
     version: GAME_STATE_CACHE_VERSION,
+    date: candidate.date,
     ...currentLevelState,
     currentLevelIndex: Math.max(0, Math.floor(candidate.currentLevelIndex)),
     unlockedLevelIndex: Math.max(0, Math.floor(candidate.unlockedLevelIndex)),
@@ -140,15 +156,25 @@ export async function readCachedGameState(): Promise<CachedGameState | null> {
 
   try {
     const rawState = storage.getItem(GAME_STATE_CACHE_KEY);
-    return rawState ? normalizeCachedState(JSON.parse(rawState)) : null;
+    if (!rawState) {
+      return null;
+    }
+
+    const cachedState = normalizeCachedState(JSON.parse(rawState));
+    if (!cachedState) {
+      storage.removeItem(GAME_STATE_CACHE_KEY);
+    }
+
+    return cachedState;
   } catch (error) {
     console.warn('Failed to read cached game state:', error);
+    storage.removeItem(GAME_STATE_CACHE_KEY);
     return null;
   }
 }
 
 export async function writeCachedGameState(
-  state: CachedGameState,
+  state: Omit<CachedGameState, 'version' | 'date'>,
 ): Promise<void> {
   const storage = getStorage();
   if (!storage) {
@@ -156,7 +182,14 @@ export async function writeCachedGameState(
   }
 
   try {
-    storage.setItem(GAME_STATE_CACHE_KEY, JSON.stringify(state));
+    storage.setItem(
+      GAME_STATE_CACHE_KEY,
+      JSON.stringify({
+        ...state,
+        version: GAME_STATE_CACHE_VERSION,
+        date: getPacificDateKey(),
+      }),
+    );
   } catch (error) {
     console.warn('Failed to write cached game state:', error);
   }

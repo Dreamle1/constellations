@@ -1,6 +1,18 @@
 import { Router, Request, Response } from 'express';
-import type { GeneratedWordsResponse } from '../services/wordGenerationService';
-import { WordGenerationService } from '../services/wordGenerationService';
+import {
+  WordGenerationError,
+  WordGenerationService,
+  type GeneratedWordsResponse,
+} from '../services/wordGenerationService';
+
+interface GameWordsErrorResponse {
+  error: {
+    code: string;
+    message: string;
+  };
+}
+
+type GameWordsRouteResponse = GeneratedWordsResponse | GameWordsErrorResponse;
 
 const router = Router();
 
@@ -21,8 +33,8 @@ function getWordService(): WordGenerationService {
 router.get(
   '/words',
   async (
-    req: Request<Record<string, never>, GeneratedWordsResponse>,
-    res: Response<GeneratedWordsResponse>,
+    req: Request<Record<string, never>, GameWordsRouteResponse>,
+    res: Response<GameWordsRouteResponse>,
   ) => {
     try {
       const wordCount = Number(req.query.wordCount ?? 5);
@@ -45,13 +57,25 @@ router.get(
     } catch (error) {
       console.error('[API ERROR]');
       console.error('  Error:', error instanceof Error ? error.message : error);
+      if (error instanceof WordGenerationError) {
+        console.error('  Code:', error.code);
+      }
       console.error('---');
 
+      const code =
+        error instanceof WordGenerationError
+          ? error.code
+          : 'WORD_GENERATION_FAILED';
+      const message =
+        error instanceof WordGenerationError
+          ? error.message
+          : 'Unable to generate words.';
+
       res.status(500).json({
-        words: [],
-        answer: [],
-        answerKey: [],
-        wordCount: 5,
+        error: {
+          code,
+          message,
+        },
       });
     }
   },

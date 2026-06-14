@@ -35,6 +35,33 @@ export class DailyWordStore {
     return entry;
   }
 
+  async getRecentWords(date: string, days: number): Promise<string[]> {
+    const stored = await this.read();
+    const currentTime = this.toDateKeyTime(date);
+    if (currentTime === null) {
+      return [];
+    }
+
+    const dayMs = 24 * 60 * 60 * 1000;
+    const uniqueWords = new Set<string>();
+
+    stored.forEach((entry) => {
+      const entryTime = this.toDateKeyTime(entry.date);
+      if (entryTime === null) {
+        return;
+      }
+
+      const daysAgo = Math.floor((currentTime - entryTime) / dayMs);
+      if (daysAgo < 0 || daysAgo > days) {
+        return;
+      }
+
+      entry.answer.forEach((word) => uniqueWords.add(word));
+    });
+
+    return Array.from(uniqueWords);
+  }
+
   async save(entry: StoredDailyWords): Promise<void> {
     const stored = await this.read();
     const nextEntries = stored.filter(
@@ -96,5 +123,15 @@ export class DailyWordStore {
       answer: parsed.answer.filter((word): word is string => typeof word === 'string'),
       createdAt: parsed.createdAt,
     };
+  }
+
+  private toDateKeyTime(date: string): number | null {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+    if (!match) {
+      return null;
+    }
+
+    const [, year, month, day] = match;
+    return Date.UTC(Number(year), Number(month) - 1, Number(day));
   }
 }

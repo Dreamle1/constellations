@@ -11,7 +11,22 @@ function replaceToken(template: string, token: string, value: string): string {
   return template.split(token).join(value);
 }
 
-export function createWordChainPrompt(wordCount: number): string {
+function formatRecentWords(recentWords: string[]): string {
+  const uniqueWords = Array.from(
+    new Set(
+      recentWords
+        .map((word) => word.trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  );
+
+  return uniqueWords.length > 0 ? uniqueWords.join(', ') : 'None';
+}
+
+export function createWordChainPrompt(
+  wordCount: number,
+  recentWords: string[] = [],
+): string {
   const wordLabels = Array.from(
     { length: wordCount },
     (_, index) => `Word ${index + 1}`,
@@ -37,5 +52,6 @@ export function createWordChainPrompt(wordCount: number): string {
   prompt = replaceToken(prompt, '{{chain}}', chain);
   prompt = replaceToken(prompt, '{{relationships}}', relationships);
   prompt = replaceToken(prompt, '{{answerExample}}', answerExample);
+  prompt = replaceToken(prompt, '{{recentWords}}', formatRecentWords(recentWords));
   return prompt;
 }

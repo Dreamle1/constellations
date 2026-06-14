@@ -30,10 +30,9 @@ export interface ApiRequestInfo {
 export interface GenerationInfo {
   provider: 'openai' | 'local';
   model?: string;
-  source: 'provider' | 'fallback' | 'database';
+  source: 'provider' | 'database';
   durationMs: number;
   promptLength?: number;
-  fallbackReason?: string;
   error?: ProviderErrorInfo;
 }
 
@@ -42,6 +41,17 @@ export interface ProviderErrorInfo {
   message: string;
   cause?: string;
   status?: number;
+}
+
+export class WordGenerationError extends Error {
+  constructor(
+    public readonly code: string,
+    message: string,
+    public readonly details?: ProviderErrorInfo,
+  ) {
+    super(message);
+    this.name = 'WordGenerationError';
+  }
 }
 
 interface OpenAIResponse {
@@ -84,14 +94,6 @@ const API_KEY_PLACEHOLDERS = new Set([
   'sk-your_openai_api_key_here',
 ]);
 
-const FALLBACK_WORD_CHAINS: string[][] = [
-  ['spark', 'flame', 'candle', 'wax', 'seal', 'stamp', 'mail', 'letter', 'paper', 'book'],
-  ['seed', 'plant', 'garden', 'fence', 'gate', 'hinge', 'door', 'room', 'echo', 'sound'],
-  ['thread', 'needle', 'fabric', 'curtain', 'window', 'glass', 'mirror', 'reflection', 'light', 'shadow'],
-  ['rain', 'umbrella', 'handle', 'lever', 'machine', 'gear', 'clock', 'hour', 'schedule', 'calendar'],
-  ['brush', 'paint', 'canvas', 'frame', 'wall', 'brick', 'chimney', 'smoke', 'signal', 'flag'],
-];
-
 const DISPLAY_ORDERS: Record<SupportedWordCount, number[]> = {
   5: [2, 0, 4, 1, 3],
   7: [3, 0, 5, 1, 6, 2, 4],
@@ -111,7 +113,7 @@ export class WordGenerationService {
 
     if (!apiKey || API_KEY_PLACEHOLDERS.has(apiKey)) {
       console.warn(
-        'OPENAI_API_KEY is not set. Using local fallback words. Add it to packages/backend/.env to enable OpenAI generation.',
+        'OPENAI_API_KEY is not set. Add it to packages/backend/.env to enable word generation.',
       );
       this.apiKey = null;
       return;
@@ -142,18 +144,15 @@ export class WordGenerationService {
     }
 
     if (!this.apiKey) {
-      const response = this.createFallbackResponse({
-        provider: 'local',
-        source: 'fallback',
-        durationMs: 0,
-        fallbackReason: 'missing_openai_api_key',
-      }, requestedWordCount);
-      await this.saveDailyWords(currentPacificDate, requestedWordCount, response);
-      return response;
+      throw new WordGenerationError(
+        'SERVICE_UNCONFIGURED',
+        'Word generation service is not configured.',
+      );
     }
 
     const startedAt = Date.now();
-    const prompt = this.createPrompt(requestedWordCount);
+    const recentWords = await this.dailyWordStore.getRecentWords(currentPacificDate, 7);
+    const prompt = this.createPrompt(requestedWordCount, recentWords);
     const baseGenerationInfo = {
       provider: 'openai' as const,
       model: this.model,
@@ -194,16 +193,16 @@ export class WordGenerationService {
 
       if (wordStrings.length < requestedWordCount) {
         console.warn(
-          `Expected ${requestedWordCount} words but got ${wordStrings.length}. Using fallback words. Response: ${text}`,
+          `Expected ${requestedWordCount} words but got ${wordStrings.length}. Response: ${text}`,
         );
-        const fallbackResponse = this.createFallbackResponse({
-          ...baseGenerationInfo,
-          source: 'fallback',
-          durationMs: Date.now() - startedAt,
-          fallbackReason: 'provider_returned_too_few_words',
-        }, requestedWordCount);
-        await this.saveDailyWords(currentPacificDate, requestedWordCount, fallbackResponse);
-        return fallbackResponse;
+        throw new WordGenerationError(
+          'PROVIDER_INVALID_RESPONSE',
+          'Word generation provider returned too few words.',
+          {
+            type: 'ProviderInvalidResponse',
+            message: `Expected ${requestedWordCount} words but got ${wordStrings.length}.`,
+          },
+        );
       }
 
       const generatedResponse: GeneratedWordsResponse = {
@@ -219,11 +218,15 @@ export class WordGenerationService {
       await this.saveDailyWords(currentPacificDate, requestedWordCount, generatedResponse);
       return generatedResponse;
     } catch (error) {
+      if (error instanceof WordGenerationError) {
+        throw error;
+      }
+
       const message = error instanceof Error ? error.message : String(error);
       const errorInfo = this.getProviderErrorInfo(error);
 
       if (this.isProviderNetworkError(error)) {
-        console.warn(`OpenAI API unavailable (${message}). Falling back to local words.`);
+        console.warn(`OpenAI API unavailable (${message}).`);
         if (errorInfo.cause) {
           console.warn('  Cause:', errorInfo.cause);
         }
@@ -239,17 +242,13 @@ export class WordGenerationService {
         }
       }
 
-      const fallbackResponse = this.createFallbackResponse({
-        ...baseGenerationInfo,
-        source: 'fallback',
-        durationMs: Date.now() - startedAt,
-        fallbackReason: this.isProviderNetworkError(error)
-          ? 'provider_network_error'
-          : 'provider_error',
-        error: errorInfo,
-      }, requestedWordCount);
-      await this.saveDailyWords(currentPacificDate, requestedWordCount, fallbackResponse);
-      return fallbackResponse;
+      throw new WordGenerationError(
+        this.isProviderNetworkError(error)
+          ? 'PROVIDER_NETWORK_ERROR'
+          : 'PROVIDER_ERROR',
+        'Word generation provider is unavailable.',
+        errorInfo,
+      );
     }
   }
 
@@ -259,8 +258,8 @@ export class WordGenerationService {
       : 5;
   }
 
-  private createPrompt(wordCount: SupportedWordCount): string {
-    return createWordChainPrompt(wordCount);
+  private createPrompt(wordCount: SupportedWordCount, recentWords: string[]): string {
+    return createWordChainPrompt(wordCount, recentWords);
   }
 
   private getPacificDateKey(date = new Date()): string {
@@ -445,23 +444,6 @@ export class WordGenerationService {
       .filter((word) => /^[a-z][a-z'-]{1,18}$/.test(word));
 
     return Array.from(new Set(normalizedWords)).slice(0, wordCount);
-  }
-
-  private createFallbackResponse(
-    generation: GenerationInfo,
-    wordCount: SupportedWordCount,
-  ): GeneratedWordsResponse {
-    return {
-      ...this.toGameWords(this.getFallbackWords(wordCount), wordCount),
-      api: {
-        generation,
-      },
-    };
-  }
-
-  private getFallbackWords(wordCount: SupportedWordCount): string[] {
-    const randomIndex = Math.floor(Math.random() * FALLBACK_WORD_CHAINS.length);
-    return FALLBACK_WORD_CHAINS[randomIndex].slice(0, wordCount);
   }
 
   private toWordItems(wordStrings: string[]): WordItem[] {

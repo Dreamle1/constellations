@@ -22,6 +22,56 @@ interface FetchWordsOptions {
   wordCount?: number;
 }
 
+interface GameWordsErrorResponse {
+  error?: {
+    code?: unknown;
+    message?: unknown;
+  };
+}
+
+export class GameWordsApiError extends Error {
+  constructor(
+    message: string,
+    public readonly code: string,
+    public readonly status?: number,
+  ) {
+    super(message);
+    this.name = 'GameWordsApiError';
+  }
+}
+
+function isGameWordsResponse(value: unknown): value is GameWordsResponse {
+  const response = value as Partial<GameWordsResponse>;
+
+  return (
+    !!response &&
+    Array.isArray(response.words) &&
+    response.words.length > 0 &&
+    response.words.every(
+      (word) => typeof word.id === 'string' && typeof word.word === 'string',
+    ) &&
+    Array.isArray(response.answer) &&
+    response.answer.length > 0 &&
+    response.answer.every((word) => typeof word === 'string') &&
+    Array.isArray(response.answerKey) &&
+    response.answerKey.length > 0 &&
+    response.answerKey.every((id) => typeof id === 'string')
+  );
+}
+
+async function parseJsonResponse(response: Response): Promise<unknown> {
+  const text = await response.text();
+  if (!text) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Fetch game words from the backend
  * Returns the requested supported word count.
@@ -50,10 +100,28 @@ export async function fetchGameWords(
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        throw new Error(`API error: ${response.status}`);
+        const errorData = (await parseJsonResponse(response)) as GameWordsErrorResponse;
+        const code =
+          typeof errorData?.error?.code === 'string'
+            ? errorData.error.code
+            : `HTTP_${response.status}`;
+        const message =
+          typeof errorData?.error?.message === 'string'
+            ? errorData.error.message
+            : `API error: ${response.status}`;
+
+        throw new GameWordsApiError(message, code, response.status);
       }
 
-      const data: GameWordsResponse = await response.json();
+      const data = await parseJsonResponse(response);
+      if (!isGameWordsResponse(data)) {
+        throw new GameWordsApiError(
+          'API returned an invalid words payload.',
+          'INVALID_WORDS_PAYLOAD',
+          response.status,
+        );
+      }
+
       return data;
     } catch (error) {
       const isLastAttempt = attempt === retries;
@@ -67,6 +135,19 @@ export async function fetchGameWords(
       );
 
       if (isLastAttempt) {
+        if (error instanceof GameWordsApiError) {
+          throw error;
+        }
+
+        throw new GameWordsApiError(
+          errorMessage,
+          error instanceof Error && error.name === 'AbortError'
+            ? 'REQUEST_TIMEOUT'
+            : 'REQUEST_FAILED',
+        );
+      }
+
+      if (error instanceof GameWordsApiError) {
         throw error;
       }
 

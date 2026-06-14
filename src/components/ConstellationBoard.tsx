@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   LayoutChangeEvent,
   Pressable,
   StyleSheet,
@@ -20,7 +22,7 @@ import type {
   WordCardModel,
   Zone,
 } from '@/types/cards';
-import { fetchGameWords } from '@/utils/gameWordsApi';
+import { fetchGameWords, GameWordsApiError } from '@/utils/gameWordsApi';
 import {
   type CachedCompletedLevelState,
   readCachedGameState,
@@ -46,6 +48,22 @@ function measureViewInWindow(
   view.measureInWindow((x, y, width, height) => {
     callback({ x, y, width, height });
   });
+}
+
+function getServiceErrorCode(error: unknown): string {
+  return error instanceof GameWordsApiError ? error.code : 'UNKNOWN_ERROR';
+}
+
+function getServiceErrorMessage(error: unknown): string {
+  if (error instanceof GameWordsApiError) {
+    return `${error.message} (${error.code})`;
+  }
+
+  return error instanceof Error ? error.message : 'Unable to load words';
+}
+
+function showServiceOfflineAlert(error: unknown) {
+  Alert.alert('Service offline', `Error code: ${getServiceErrorCode(error)}`);
 }
 
 export const ConstellationBoard: React.FC = () => {
@@ -169,9 +187,8 @@ export const ConstellationBoard: React.FC = () => {
           return;
         }
 
-        const message =
-          error instanceof Error ? error.message : 'Unable to load words';
-        setWordLoadError(message);
+        setWordLoadError(getServiceErrorMessage(error));
+        showServiceOfflineAlert(error);
       } finally {
         if (!cancelled) {
           cacheReadyRef.current = true;
@@ -193,7 +210,6 @@ export const ConstellationBoard: React.FC = () => {
     }
 
     writeCachedGameState({
-      version: 7,
       levelIndex: currentLevelIndex,
       cards,
       answerKey,
@@ -376,9 +392,8 @@ export const ConstellationBoard: React.FC = () => {
           refreshPlayColumnLayout();
         });
       } catch (error) {
-        const message =
-          error instanceof Error ? error.message : 'Unable to load words';
-        setWordLoadError(message);
+        setWordLoadError(getServiceErrorMessage(error));
+        showServiceOfflineAlert(error);
       } finally {
         setLoadingWords(false);
       }
@@ -497,7 +512,6 @@ export const ConstellationBoard: React.FC = () => {
       setCompletedLevelStates(nextCompletedLevelStates);
       setUnlockedLevelIndex(nextUnlockedLevelIndex);
       writeCachedGameState({
-        version: 7,
         levelIndex: currentLevelIndex,
         cards,
         answerKey,
@@ -535,7 +549,6 @@ export const ConstellationBoard: React.FC = () => {
       setCompletedLevelStates(nextCompletedLevelStates);
       setUnlockedLevelIndex(nextUnlockedLevelIndex);
       writeCachedGameState({
-        version: 7,
         levelIndex: currentLevelIndex,
         cards,
         answerKey,
@@ -875,11 +888,6 @@ export const ConstellationBoard: React.FC = () => {
       onLayout={onContainerLayout}
     >
       <View style={styles.board}>
-        {loadingWords && (
-          <View style={styles.statusPanel}>
-            <Text style={styles.statusText}>Loading words...</Text>
-          </View>
-        )}
         {wordLoadError && (
           <View style={styles.statusPanel}>
             <Text style={styles.statusText}>Unable to load words.</Text>
@@ -1045,6 +1053,19 @@ export const ConstellationBoard: React.FC = () => {
             )}
           </View>
         </View>
+
+        {loadingWords && (
+          <View
+            style={styles.loadingOverlay}
+            accessibilityRole="progressbar"
+            accessibilityLabel="Loading game"
+          >
+            <View style={styles.loadingPanel}>
+              <ActivityIndicator color="#278777" size="large" />
+              <Text style={styles.loadingText}>Loading game...</Text>
+            </View>
+          </View>
+        )}
       </View>
 
       <View style={styles.footer}>{renderActions()}</View>
@@ -1086,6 +1107,7 @@ const styles = StyleSheet.create({
     gap: 16,
     padding: 16,
     paddingBottom: 8,
+    position: 'relative',
   },
   container: {
     flex: 1,
@@ -1197,6 +1219,33 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     marginTop: 2,
+  },
+  loadingOverlay: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(248, 249, 252, 0.92)',
+    bottom: 0,
+    justifyContent: 'center',
+    left: 0,
+    padding: 16,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    zIndex: 20,
+  },
+  loadingPanel: {
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    borderColor: '#dfe3f0',
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 12,
+    paddingHorizontal: 24,
+    paddingVertical: 20,
+  },
+  loadingText: {
+    color: '#465066',
+    fontSize: 15,
+    fontWeight: '700',
   },
   playArea: {
     flex: 1,
