@@ -3,7 +3,9 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  Dimensions,
   LayoutChangeEvent,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -82,16 +84,26 @@ function mergeLevelState(
 }
 
 const MIN_PLAY_CARD_WIDTH = 88;
+const MIN_PLAY_COLUMN_WIDTH = 280;
+const MIN_PLAY_COLUMN_HEIGHT = 330;
 const MAX_HORSESHOE_WIDTH = 560;
 const PLAY_CARD_GAP = 10;
-const DEBUG_DRAG = true;
+const PLAY_CONTROL_GAP = 8;
+const MAX_LAYOUT_MEASURE_RETRIES = 3;
+const PREVENT_TOUCH_SCROLL_STYLE = {
+  touchAction: 'none',
+  userSelect: 'none',
+} as ViewStyle;
 
-function debugBoardDrag(message: string, details?: unknown) {
-  if (!DEBUG_DRAG) {
-    return;
-  }
-
-  console.log(`[drag-board] ${message}`, details ?? '');
+function isUsableLayoutRect(rect: LayoutRect): boolean {
+  return (
+    Number.isFinite(rect.x) &&
+    Number.isFinite(rect.y) &&
+    Number.isFinite(rect.width) &&
+    Number.isFinite(rect.height) &&
+    rect.width > 0 &&
+    rect.height > 0
+  );
 }
 
 interface HorseshoeSlot {
@@ -203,7 +215,9 @@ function createHorseshoeLayout(
   size: PlayColumnSize,
   wordCount: number,
 ): HorseshoeLayout {
-  const { height: availableHeight, width } = size;
+  const availableHeight =
+    size.height > 0 ? size.height : MIN_PLAY_COLUMN_HEIGHT;
+  const width = size.width > 0 ? size.width : MIN_PLAY_COLUMN_WIDTH;
   const columnSlots = wordCount >= 7 ? 4 : 3;
   const isNarrowLayout = width < 520;
   const maxCardWidth = Math.min(
@@ -229,7 +243,7 @@ function createHorseshoeLayout(
     cardWidth * 0.78,
     (targetWidth - cardWidth) / (maxTemplateX * 2),
   );
-  const reservedBottom = 66;
+  const reservedBottom = 0;
   const verticalTopPadding = Math.max(cardHeight * 0.5, isNarrowLayout ? 22 : 34);
   const availableContentHeight = Math.max(
     cardHeight,
@@ -245,10 +259,16 @@ function createHorseshoeLayout(
     ),
   );
   const contentHeight = maxTemplateRow * rowStep + cardHeight;
-  const verticalOffset = Math.max(
-    verticalTopPadding,
+  const preferredVerticalOffset =
     (availableHeight - reservedBottom - contentHeight) / 2 +
-      verticalTopPadding * 0.15,
+    verticalTopPadding * 0.15;
+  const maxVerticalOffset = Math.max(
+    verticalTopPadding,
+    availableHeight - reservedBottom - contentHeight,
+  );
+  const verticalOffset = Math.min(
+    Math.max(verticalTopPadding, preferredVerticalOffset),
+    maxVerticalOffset,
   );
   const centerX = width / 2;
   const slots = template.map((point) => ({
@@ -443,27 +463,43 @@ export const ConstellationBoard: React.FC = () => {
 
   const refreshFieldLayout = useCallback(() => {
     measureViewInWindow(fieldRef.current, (rect) => {
+      if (!isUsableLayoutRect(rect)) {
+        return;
+      }
+
       fieldLayout.current = rect;
     });
   }, []);
 
   const refreshPlayLayout = useCallback(() => {
     measureViewInWindow(playAreaRef.current, (rect) => {
+      if (!isUsableLayoutRect(rect)) {
+        return;
+      }
+
       playLayout.current = rect;
     });
   }, []);
 
   const refreshPlayColumnLayout = useCallback(() => {
     measureViewInWindow(playColumnRef.current, (rect) => {
+      if (!isUsableLayoutRect(rect)) {
+        return;
+      }
+
       playColumnLayout.current = rect;
     });
   }, []);
 
   const refreshDragLayerLayout = useCallback(
-    (callback?: (rect: LayoutRect) => void) => {
+    (callback?: (rect: LayoutRect) => void, attempt = 0) => {
       measureViewInWindow(containerRef.current, (rect) => {
-        if (rect.width <= 0 || rect.height <= 0) {
-          requestAnimationFrame(() => refreshDragLayerLayout(callback));
+        if (!isUsableLayoutRect(rect)) {
+          if (attempt < MAX_LAYOUT_MEASURE_RETRIES) {
+            requestAnimationFrame(() =>
+              refreshDragLayerLayout(callback, attempt + 1),
+            );
+          }
           return;
         }
 
@@ -483,8 +519,12 @@ export const ConstellationBoard: React.FC = () => {
   );
 
   const handlePlayItemLayout = useCallback((cardId: string, rect: LayoutRect) => {
+    if (!isUsableLayoutRect(rect)) {
+      return;
+    }
+
     const columnLayout = playColumnLayout.current;
-    if (!columnLayout) {
+    if (!columnLayout || !isUsableLayoutRect(columnLayout)) {
       playItemLayouts.current.set(cardId, rect);
       return;
     }
@@ -515,11 +555,19 @@ export const ConstellationBoard: React.FC = () => {
   const onPlayColumnLayout = useCallback(
     (event: LayoutChangeEvent) => {
       const { height, width } = event.nativeEvent.layout;
-      setPlayColumnSize((current) =>
-        current.height === height && current.width === width
-          ? current
-          : { height, width },
-      );
+      if (width <= 0 || height <= 0) {
+        requestAnimationFrame(() => refreshPlayColumnLayout());
+        return;
+      }
+
+      setPlayColumnSize((current) => {
+        if (current.height === height && current.width === width) {
+          return current;
+        }
+
+        playItemLayouts.current.clear();
+        return { height, width };
+      });
       refreshPlayColumnLayout();
     },
     [refreshPlayColumnLayout],
@@ -531,6 +579,96 @@ export const ConstellationBoard: React.FC = () => {
     setHoverZone(null);
     setDropPreviewIndex(null);
   }, []);
+
+  useEffect(() => {
+    let frameOne: number | null = null;
+    let frameTwo: number | null = null;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+
+    const refreshAfterViewportChange = () => {
+      clearDrag();
+      playItemLayouts.current.clear();
+
+      frameOne = requestAnimationFrame(() => {
+        refreshDragLayerLayout();
+        refreshFieldLayout();
+        refreshPlayLayout();
+        refreshPlayColumnLayout();
+
+        frameTwo = requestAnimationFrame(() => {
+          refreshDragLayerLayout();
+          refreshFieldLayout();
+          refreshPlayLayout();
+          refreshPlayColumnLayout();
+        });
+      });
+
+      timeout = setTimeout(() => {
+        refreshDragLayerLayout();
+        refreshFieldLayout();
+        refreshPlayLayout();
+        refreshPlayColumnLayout();
+      }, 250);
+    };
+
+    const subscription = Dimensions.addEventListener(
+      'change',
+      refreshAfterViewportChange,
+    );
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        refreshAfterViewportChange();
+      }
+    };
+
+    const canUseDocumentEvents =
+      Platform.OS === 'web' &&
+      typeof document !== 'undefined' &&
+      typeof document.addEventListener === 'function' &&
+      typeof document.removeEventListener === 'function';
+    const canUseWindowEvents =
+      Platform.OS === 'web' &&
+      typeof window !== 'undefined' &&
+      typeof window.addEventListener === 'function' &&
+      typeof window.removeEventListener === 'function';
+
+    if (canUseDocumentEvents) {
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    }
+
+    if (canUseWindowEvents) {
+      window.addEventListener('focus', refreshAfterViewportChange);
+    }
+
+    return () => {
+      subscription.remove();
+
+      if (canUseDocumentEvents) {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      }
+
+      if (canUseWindowEvents) {
+        window.removeEventListener('focus', refreshAfterViewportChange);
+      }
+
+      if (frameOne !== null) {
+        cancelAnimationFrame(frameOne);
+      }
+      if (frameTwo !== null) {
+        cancelAnimationFrame(frameTwo);
+      }
+      if (timeout !== null) {
+        clearTimeout(timeout);
+      }
+    };
+  }, [
+    clearDrag,
+    refreshDragLayerLayout,
+    refreshFieldLayout,
+    refreshPlayColumnLayout,
+    refreshPlayLayout,
+  ]);
 
   const resetGame = useCallback(() => {
     clearDrag();
@@ -933,7 +1071,6 @@ export const ConstellationBoard: React.FC = () => {
           y,
           displayIdsForInsert,
         );
-        console.log('Calculated drop preview index:', index);
         setDropPreviewIndex(index);
         return;
       }
@@ -959,21 +1096,8 @@ export const ConstellationBoard: React.FC = () => {
   const handleDragStart = useCallback(
     (cardId: string, x: number, y: number, cardRect: LayoutRect) => {
       if (interactionsLocked) {
-        debugBoardDrag('start ignored: interactions locked', {
-          cardId,
-          x,
-          y,
-          interactionsLocked,
-        });
         return;
       }
-      debugBoardDrag('start', {
-        cardId,
-        x,
-        y,
-        cardRect,
-        hasDragLayerLayout: Boolean(dragLayerLayout.current),
-      });
       const fromZone: Zone = playIds.includes(cardId) ? 'play' : 'field';
       const fromFieldIndex =
         fromZone === 'field' ? fieldIds.indexOf(cardId) : undefined;
@@ -999,7 +1123,6 @@ export const ConstellationBoard: React.FC = () => {
 
       dragStateRef.current = nextDrag;
       setDragState(nextDrag);
-      debugBoardDrag('state set on start', nextDrag);
       updateDropPreview(x, y);
     },
     [
@@ -1013,13 +1136,6 @@ export const ConstellationBoard: React.FC = () => {
   const handleDragMove = useCallback(
     (cardId: string, x: number, y: number) => {
       if (interactionsLocked || dragStateRef.current?.cardId !== cardId) {
-        debugBoardDrag('move ignored', {
-          cardId,
-          x,
-          y,
-          interactionsLocked,
-          activeCardId: dragStateRef.current?.cardId,
-        });
         return;
       }
       const nextDrag = {
@@ -1029,13 +1145,6 @@ export const ConstellationBoard: React.FC = () => {
       };
       dragStateRef.current = nextDrag;
       setDragState(nextDrag);
-      debugBoardDrag('move applied', {
-        cardId,
-        x,
-        y,
-        grabOffsetX: nextDrag.grabOffsetX,
-        grabOffsetY: nextDrag.grabOffsetY,
-      });
       updateDropPreview(x, y);
     },
     [interactionsLocked, updateDropPreview],
@@ -1044,18 +1153,12 @@ export const ConstellationBoard: React.FC = () => {
   const handleDragEnd = useCallback(
     (cardId: string, x: number, y: number) => {
       if (interactionsLocked) {
-        debugBoardDrag('end ignored: interactions locked', { cardId, x, y });
         clearDrag();
         return;
       }
-      debugBoardDrag('end', { cardId, x, y });
 
       const activeDrag = dragStateRef.current;
       if (!activeDrag || activeDrag.cardId !== cardId) {
-        debugBoardDrag('end without active drag', {
-          cardId,
-          activeCardId: activeDrag?.cardId,
-        });
         clearDrag();
         return;
       }
@@ -1063,11 +1166,6 @@ export const ConstellationBoard: React.FC = () => {
       const { fromZone, fromPlayIndex } = activeDrag;
 
       if (pointInRect(x, y, fieldLayout.current)) {
-        debugBoardDrag('drop target field', {
-          cardId,
-          fromZone,
-          fieldLayout: fieldLayout.current,
-        });
         if (fromZone === 'field') {
           // Cancel drag — card stays in field at its original slot.
         } else {
@@ -1086,11 +1184,6 @@ export const ConstellationBoard: React.FC = () => {
       }
 
       if (pointInRect(x, y, playLayout.current)) {
-        debugBoardDrag('drop target play', {
-          cardId,
-          fromZone,
-          playLayout: playLayout.current,
-        });
         const displayIds = getDisplayPlayIds(playIds);
         const displayIdsForInsert = displayIds.filter((id) => id !== cardId);
         const displayInsertIndex = getDisplayDropIndex(
@@ -1099,7 +1192,6 @@ export const ConstellationBoard: React.FC = () => {
           displayIdsForInsert,
         );
         if (displayInsertIndex === null) {
-          debugBoardDrag('play drop missing insert index', { cardId, x, y });
           clearDrag();
           return;
         }
@@ -1111,13 +1203,8 @@ export const ConstellationBoard: React.FC = () => {
           return toLogicalPlayIds(nextDisplayIds);
         });
       } else if (fromZone === 'field') {
-        debugBoardDrag('drop outside from field', { cardId, x, y });
         setPlayIds((prev) => prev.filter((id) => id !== cardId));
       } else if (fromPlayIndex !== undefined) {
-        debugBoardDrag('drop outside from play: restoring', {
-          cardId,
-          fromPlayIndex,
-        });
         setFieldIds((prev) => prev.filter((id) => id !== cardId));
         setPlayIds((prev) => {
           if (prev.includes(cardId)) {
@@ -1179,6 +1266,47 @@ export const ConstellationBoard: React.FC = () => {
     inputRange: [0, 0.15, 0.3, 0.45, 0.6, 0.75, 1],
     outputRange: [0, -9, 9, -7, 7, -3, 0],
   });
+
+  useEffect(() => {
+    if (
+      !dragState ||
+      Platform.OS !== 'web' ||
+      typeof document === 'undefined' ||
+      typeof window === 'undefined'
+    ) {
+      return;
+    }
+
+    const body = document.body;
+    const root = document.documentElement;
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+    const previousBodyOverflow = body.style.overflow;
+    const previousBodyOverscroll = body.style.overscrollBehavior;
+    const previousBodyTouchAction = body.style.touchAction;
+    const previousRootOverflow = root.style.overflow;
+    const previousRootOverscroll = root.style.overscrollBehavior;
+    const previousRootTouchAction = root.style.touchAction;
+
+    body.style.overflow = 'hidden';
+    body.style.overscrollBehavior = 'none';
+    body.style.touchAction = 'none';
+    root.style.overflow = 'hidden';
+    root.style.overscrollBehavior = 'none';
+    root.style.touchAction = 'none';
+
+    return () => {
+      body.style.overflow = previousBodyOverflow;
+      body.style.overscrollBehavior = previousBodyOverscroll;
+      body.style.touchAction = previousBodyTouchAction;
+      root.style.overflow = previousRootOverflow;
+      root.style.overscrollBehavior = previousRootOverscroll;
+      root.style.touchAction = previousRootTouchAction;
+      if (typeof window.scrollTo === 'function') {
+        window.scrollTo(scrollX, scrollY);
+      }
+    };
+  }, [dragState]);
 
   useEffect(() => {
     const visibleIds = new Set(displayPlayIds);
@@ -1250,10 +1378,10 @@ export const ConstellationBoard: React.FC = () => {
   return (
     <View
       ref={containerRef}
-      style={styles.container}
+      style={[styles.container, PREVENT_TOUCH_SCROLL_STYLE]}
       onLayout={onContainerLayout}
     >
-      <View style={styles.board}>
+      <View style={[styles.board, PREVENT_TOUCH_SCROLL_STYLE]}>
         {wordLoadError && (
           <View style={[styles.statusPanel, styles.statusPanelError]}>
             <Text style={[styles.statusText, styles.statusTextError]}>
@@ -1309,6 +1437,7 @@ export const ConstellationBoard: React.FC = () => {
             style={[
               styles.section,
               styles.playArea,
+              PREVENT_TOUCH_SCROLL_STYLE,
               dragState?.fromZone === 'play' && styles.playAreaDragging,
               hoverZone === 'play' && styles.sectionActive,
               interactionsLocked && styles.sectionLocked,
@@ -1326,7 +1455,7 @@ export const ConstellationBoard: React.FC = () => {
             <Text style={styles.sectionLabel}>play-area</Text>
             <View
               ref={playColumnRef}
-              style={[styles.playColumn, { minHeight: horseshoeLayout.height }]}
+              style={[styles.playColumn, PREVENT_TOUCH_SCROLL_STYLE]}
               onLayout={onPlayColumnLayout}
             >
             {displayPlayIdsForInsert.slice(1).map((cardId, index) => {
@@ -1467,6 +1596,7 @@ export const ConstellationBoard: React.FC = () => {
           ref={fieldRef}
           style={[
             styles.section,
+            PREVENT_TOUCH_SCROLL_STYLE,
             dragState?.fromZone === 'field' && styles.draggingSection,
             hoverZone === 'field' && styles.sectionActive,
             interactionsLocked && styles.sectionLocked,
@@ -1475,7 +1605,7 @@ export const ConstellationBoard: React.FC = () => {
           accessibilityLabel="card-field"
         >
           <Text style={styles.sectionLabel}>card-field</Text>
-          <View style={styles.fieldRow}>
+          <View style={[styles.fieldRow, PREVENT_TOUCH_SCROLL_STYLE]}>
             {fieldIds.map((cardId) => {
               const card = cardsById.get(cardId);
               if (!card) {
@@ -1616,16 +1746,16 @@ const styles = StyleSheet.create({
     zIndex: 0,
   },
   flipButton: {
+    alignItems: 'center',
     backgroundColor: '#ffffff',
     borderColor: '#c7cedd',
     borderRadius: 8,
     borderWidth: 1,
-    bottom: 10,
-    left: 10,
+    justifyContent: 'center',
+    marginTop: PLAY_CONTROL_GAP,
+    minHeight: 40,
     paddingVertical: 8,
-    position: 'absolute',
-    right: 10,
-    zIndex: 10,
+    width: '100%',
   },
   flipButtonActive: {
     backgroundColor: '#e6f4f1',
@@ -1740,8 +1870,8 @@ const styles = StyleSheet.create({
   playColumn: {
     alignSelf: 'center',
     flex: 1,
-    marginBottom: 64,
     maxWidth: 760,
+    minHeight: 0,
     overflow: 'visible',
     position: 'relative',
     width: '100%',

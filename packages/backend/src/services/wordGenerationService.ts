@@ -160,12 +160,6 @@ export class WordGenerationService {
     };
 
     try {
-      console.log('Calling OpenAI Responses API...');
-      console.log('  Endpoint:', OPENAI_RESPONSES_URL);
-      console.log('  Model:', this.model);
-      console.log('  Prompt Length:', prompt.length);
-      console.log('  Prompt:', prompt);
-
       const providerResponse = await fetch(OPENAI_RESPONSES_URL, {
         method: 'POST',
         headers: {
@@ -180,21 +174,10 @@ export class WordGenerationService {
       });
 
       const responseBody = await this.parseOpenAIResponse(providerResponse);
-
-      console.log('OpenAI API response received');
-      console.log('  Status:', providerResponse.status);
-      console.log('  Raw response:', responseBody);
-
       const text = this.getGeneratedText(responseBody).trim();
-
-      console.log('Generated text:', text);
-
       const wordStrings = this.parseWordChainAnswer(text, requestedWordCount);
 
       if (wordStrings.length < requestedWordCount) {
-        console.warn(
-          `Expected ${requestedWordCount} words but got ${wordStrings.length}. Response: ${text}`,
-        );
         throw new WordGenerationError(
           'PROVIDER_INVALID_RESPONSE',
           'Word generation provider returned too few words.',

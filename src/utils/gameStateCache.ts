@@ -166,8 +166,7 @@ export async function readCachedGameState(): Promise<CachedGameState | null> {
     }
 
     return cachedState;
-  } catch (error) {
-    console.warn('Failed to read cached game state:', error);
+  } catch {
     storage.removeItem(GAME_STATE_CACHE_KEY);
     return null;
   }
@@ -190,7 +189,7 @@ export async function writeCachedGameState(
         date: getPacificDateKey(),
       }),
     );
-  } catch (error) {
-    console.warn('Failed to write cached game state:', error);
+  } catch {
+    return;
   }
 }

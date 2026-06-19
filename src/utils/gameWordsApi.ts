@@ -130,10 +130,6 @@ export async function fetchGameWords(
           ? error.message
           : 'Unknown error fetching words';
 
-      console.warn(
-        `Failed to fetch words (attempt ${attempt + 1}/${retries + 1}): ${errorMessage}`,
-      );
-
       if (isLastAttempt) {
         if (error instanceof GameWordsApiError) {
           throw error;

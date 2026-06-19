@@ -43,20 +43,52 @@ yarn start
    - **Android**: Press `a`
    - **Web**: Press `w`
 
-## 📁 Project Structure
+## Project Structure
 
 ```
-src/
-├── components/          # Reusable UI components
-├── screens/             # Screen components
-├── hooks/               # Custom React hooks
-├── utils/               # Utility functions
-├── types/               # TypeScript type definitions
-app/
-├── _layout.tsx          # Root layout with routing
-├── index.tsx            # Home screen
-assets/                  # Images, fonts, etc.
+app/                         Expo Router entry points
+  _layout.tsx                Root route layout
+  index.tsx                  Main game screen route
+
+src/                         React Native frontend source
+  components/                Game UI components, board, cards, banners, controls
+  constants/                 Shared frontend constants such as game levels
+  hooks/                     Reusable React hooks
+  screens/                   Screen-level components
+  types/                     Frontend TypeScript types
+  utils/                     API clients, cache helpers, layout/drag utilities
+
+packages/
+  backend/                   Express backend deployed to Render
+    src/server.ts            Express app setup, CORS, health route
+    src/routes/              API route handlers
+    src/services/            Word generation and daily word storage
+    data/                    Local generated daily word cache
+  shared/                    Types shared by frontend and backend
+    src/index.ts             Shared API response and word models
+
+assets/                      Expo icons, splash images, and static assets
+scripts/                     Repo-level helper scripts
+docs/                        Project documentation
 ```
+
+The mobile app fetches game words from the backend using `EXPO_PUBLIC_API_URL`
+from the root `.env`. For the hosted Render backend, this should point at:
+
+```bash
+EXPO_PUBLIC_API_URL=https://constellations-3ils.onrender.com
+```
+
+Backend secrets such as `OPENAI_API_KEY` belong in Render environment variables
+or `packages/backend/.env` for local backend development. Do not put backend
+secrets in Expo public env vars.
+
+## Agent Context
+
+Persistent notes for Codex and other coding agents live in `AGENTS.md` at the
+repo root. Use that file for project-specific context, conventions, known
+deployment URLs, commands, and things future chats should understand before
+making changes.
 
 ## 🔧 Available Scripts
 

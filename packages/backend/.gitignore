@@ -1,5 +1,7 @@
 # Backend
-packages/backend/.env
+.env
+.env.local
+.env.*.local
 packages/backend/node_modules
 packages/backend/dist
 packages/backend/data

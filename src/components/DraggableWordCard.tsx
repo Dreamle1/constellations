@@ -2,6 +2,7 @@ import React, { useMemo, useRef } from 'react';
 import {
   LayoutChangeEvent,
   PanResponder,
+  StyleSheet,
   View,
   type GestureResponderEvent,
   type PanResponderGestureState,
@@ -14,15 +15,6 @@ import type { LayoutRect } from '@/types/cards';
 import { WordCard } from './WordCard';
 
 const DRAG_THRESHOLD = 4;
-const DEBUG_DRAG = true;
-
-function debugDrag(message: string, details?: Record<string, unknown>) {
-  if (!DEBUG_DRAG) {
-    return;
-  }
-
-  console.log(`[drag-card] ${message}`, details ?? '');
-}
 
 function measureViewInWindow(
   view: RNView | null,
@@ -56,6 +48,10 @@ function shouldStartDrag(gestureState: PanResponderGestureState) {
     Math.abs(gestureState.dx) > DRAG_THRESHOLD ||
     Math.abs(gestureState.dy) > DRAG_THRESHOLD
   );
+}
+
+function preventBrowserPan(event: GestureResponderEvent) {
+  event.preventDefault();
 }
 
 interface DraggableWordCardProps {
@@ -106,7 +102,6 @@ export const DraggableWordCard: React.FC<DraggableWordCardProps> = ({
 
   const updateMeasuredRect = () => {
     measureViewInWindow(cardRef.current, (cardRect) => {
-      debugDrag('measured rect', { cardId: cardIdRef.current, cardRect });
       lastCardRectRef.current = cardRect;
       pendingCardRectRef.current = cardRect;
 
@@ -117,18 +112,12 @@ export const DraggableWordCard: React.FC<DraggableWordCardProps> = ({
 
       pendingDragStartRef.current = false;
       activeDragRef.current = true;
-      debugDrag('starting pending drag after measure', {
-        cardId: cardIdRef.current,
-        point,
-        cardRect,
-      });
       onDragStart(cardIdRef.current, point.x, point.y, cardRect);
       onDragMove(cardIdRef.current, point.x, point.y);
     });
   };
 
   const handleLayout = (_event: LayoutChangeEvent) => {
-    debugDrag('layout', { cardId });
     requestAnimationFrame(updateMeasuredRect);
   };
 
@@ -140,55 +129,28 @@ export const DraggableWordCard: React.FC<DraggableWordCardProps> = ({
         onMoveShouldSetPanResponder: () => !disabled,
         onMoveShouldSetPanResponderCapture: () => !disabled,
         onPanResponderGrant: (event, gestureState) => {
+          preventBrowserPan(event);
           resetDragRefs();
           const point = getGesturePoint(event, gestureState);
-          debugDrag('grant', {
-            cardId: cardIdRef.current,
-            disabled,
-            point,
-            pageX: event.nativeEvent.pageX,
-            pageY: event.nativeEvent.pageY,
-            moveX: gestureState.moveX,
-            moveY: gestureState.moveY,
-          });
           pendingStartPointRef.current = point;
           pendingCardRectRef.current = lastCardRectRef.current;
           updateMeasuredRect();
         },
         onPanResponderMove: (event, gestureState) => {
+          preventBrowserPan(event);
           const point = getGesturePoint(event, gestureState);
           pendingStartPointRef.current = point;
 
           if (!activeDragRef.current && shouldStartDrag(gestureState)) {
             const cardRect = pendingCardRectRef.current ?? lastCardRectRef.current;
-          debugDrag('threshold crossed', {
-            cardId: cardIdRef.current,
-            point,
-            dx: gestureState.dx,
-            dy: gestureState.dy,
-            pageX: event.nativeEvent.pageX,
-            pageY: event.nativeEvent.pageY,
-            moveX: gestureState.moveX,
-            moveY: gestureState.moveY,
-            hasPendingRect: Boolean(pendingCardRectRef.current),
-            hasLastRect: Boolean(lastCardRectRef.current),
-          });
             if (!cardRect) {
               pendingDragStartRef.current = true;
-              debugDrag('waiting for rect before drag start', {
-                cardId: cardIdRef.current,
-              });
               updateMeasuredRect();
               return;
             }
 
             pendingDragStartRef.current = false;
             activeDragRef.current = true;
-            debugDrag('starting drag from move', {
-              cardId: cardIdRef.current,
-              point,
-              cardRect,
-            });
             onDragStart(cardIdRef.current, point.x, point.y, cardRect);
           }
 
@@ -196,27 +158,11 @@ export const DraggableWordCard: React.FC<DraggableWordCardProps> = ({
             return;
           }
 
-          debugDrag('move active', {
-            cardId: cardIdRef.current,
-            point,
-            dx: gestureState.dx,
-            dy: gestureState.dy,
-            pageX: event.nativeEvent.pageX,
-            pageY: event.nativeEvent.pageY,
-            moveX: gestureState.moveX,
-            moveY: gestureState.moveY,
-          });
           onDragMove(cardIdRef.current, point.x, point.y);
         },
         onPanResponderRelease: (event, gestureState) => {
+          preventBrowserPan(event);
           const point = getGesturePoint(event, gestureState);
-          debugDrag('release', {
-            cardId: cardIdRef.current,
-            active: activeDragRef.current,
-            point,
-            dx: gestureState.dx,
-            dy: gestureState.dy,
-          });
 
           if (!activeDragRef.current) {
             resetDragRefs();
@@ -230,19 +176,9 @@ export const DraggableWordCard: React.FC<DraggableWordCardProps> = ({
           resetDragRefs();
         },
         onPanResponderTerminate: () => {
-          debugDrag('terminate', {
-            cardId: cardIdRef.current,
-            active: activeDragRef.current,
-          });
           resetDragRefs();
         },
-        onPanResponderTerminationRequest: () => {
-          debugDrag('termination request', {
-            cardId: cardIdRef.current,
-            active: activeDragRef.current,
-          });
-          return false;
-        },
+        onPanResponderTerminationRequest: () => false,
       }),
     [disabled, onDragEnd, onDragMove, onDragStart, onPress],
   );
@@ -252,10 +188,17 @@ export const DraggableWordCard: React.FC<DraggableWordCardProps> = ({
       ref={cardRef}
       collapsable={false}
       onLayout={handleLayout}
-      style={containerStyle}
+      style={[styles.dragSurface, containerStyle]}
       {...panResponder.panHandlers}
     >
       {!hidden && <WordCard cardId={cardId} word={word} style={cardStyle} />}
     </View>
   );
 };
+
+const styles = StyleSheet.create({
+  dragSurface: {
+    touchAction: 'none',
+    userSelect: 'none',
+  } as ViewStyle,
+});
