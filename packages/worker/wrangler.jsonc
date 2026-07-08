@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "constellations-backend",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-01",
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "OPENAI_MODEL": "gpt-4.1-mini"
+  },
+  "d1_databases": [
+    {
+      "binding": "WORDS_DB",
+      "database_name": "constellations_words",
+      "database_id": "replace-with-cloudflare-d1-database-id"
+    }
+  ]
+}

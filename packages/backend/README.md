@@ -1,62 +1,71 @@
-# Constellations Backend
+# Constellations Express Backend
 
-Node.js + Express backend for the Constellations game, providing AI-powered word generation using Anthropic's Claude API.
+Node.js + Express backend for local development and Render fallback. The
+preferred hosted backend on this branch is `packages/worker`.
 
 ## Setup
 
-### 1. Install Dependencies
+Install dependencies from the repo root:
 
-From the root directory:
-```bash
-npm install
+```powershell
+npm.cmd install
 ```
-
-This installs dependencies for both the backend and shared packages due to the monorepo structure.
-
-### 2. Configure Environment
 
 Copy the example environment file:
-```bash
-cp packages/backend/.env.example packages/backend/.env
+
+```powershell
+copy packages\backend\.env.example packages\backend\.env
 ```
 
-Then edit `packages/backend/.env` and add your Anthropic API key:
-```
-ANTHROPIC_API_KEY=your_api_key_here
+Edit `packages/backend/.env`:
+
+```env
+OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_MODEL=gpt-4.1-mini
 PORT=3001
+NODE_ENV=development
 ```
 
-Get your API key at: https://console.anthropic.com
+## Run
 
-## Running the Backend
+Development:
 
-### Development Mode
-```bash
+```powershell
 npm run backend:dev
 ```
 
-The server will start on `http://localhost:3001` and automatically restart on file changes.
+Production-style local run:
 
-### Production Build
-```bash
+```powershell
 npm run backend:build
 npm run backend:start
 ```
 
-## API Endpoints
+## API
 
 ### Health Check
-```
+
+```text
 GET /health
 ```
-Response: `{ "status": "ok" }`
 
-### Generate Game Words
-```
-GET /api/game/words
+Response:
+
+```json
+{ "status": "ok" }
 ```
 
-**Response:**
+### Game Words
+
+```text
+GET /api/game/words?wordCount=5
+```
+
+Supported `wordCount` values are `5`, `7`, and `9`. Unsupported values fall
+back to `5`.
+
+Response:
+
 ```json
 {
   "words": [
@@ -67,75 +76,52 @@ GET /api/game/words
     { "id": "card-3", "word": "wax" }
   ],
   "answer": ["spark", "flame", "candle", "wax", "seal"],
-  "answerKey": ["card-0", "card-1", "card-2", "card-3", "card-4"]
+  "answerKey": ["card-0", "card-1", "card-2", "card-3", "card-4"],
+  "wordCount": 5
 }
 ```
 
-**Error Handling:**
-If the API call fails, the backend returns default fallback words instead of erroring out.
+## Storage
 
-## Running Frontend + Backend Together
+The Express backend stores generated daily words in a local JSON file by
+default:
 
-From the root directory:
-```bash
-npm run dev:all
+```text
+packages/backend/data/daily-words.json
 ```
 
-This uses `concurrently` to run both the frontend and backend in parallel.
-
-## Project Structure
-
-```
-packages/
-  backend/
-    src/
-      services/       # Business logic (AI integration)
-      routes/         # API route handlers
-      server.ts       # Express server setup
-  shared/
-    src/index.ts      # Shared TypeScript types
-```
-
-## Extending the Backend
-
-### Adding New Endpoints
-
-1. Create a new file in `packages/backend/src/routes/`
-2. Define your route handlers
-3. Import and register in `src/server.ts`
-
-### Changing the AI Provider
-
-Currently using Anthropic Claude. To switch providers:
-
-1. Update the dependency in `packages/backend/package.json`
-2. Modify `packages/backend/src/services/wordGenerationService.ts`
-3. Update the prompt/API call logic
-
-## Type Safety
-
-The frontend and backend share types from `@constellations/shared`. Update shared types in `packages/shared/src/index.ts` and they're automatically available in both projects.
+Override with `WORD_STORE_PATH` if needed. This local storage is not durable on
+Render free instances after restarts, which is one reason the Cloudflare Worker
+uses D1 instead.
 
 ## Deployment
 
-### Environment Variables Required
-- `ANTHROPIC_API_KEY` - Your Anthropic API key
+Render fallback configuration lives in `render.yaml`. Required production
+environment variables:
 
-### Production Checklist
-- Set `NODE_ENV=production`
-- Use `npm run backend:build` then `npm run backend:start`
-- Set appropriate `PORT` variable
-- Ensure `ANTHROPIC_API_KEY` is securely configured
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL`
+- `NODE_ENV=production`
+
+Use:
+
+```powershell
+npm run backend:build
+npm run backend:start
+```
 
 ## Troubleshooting
 
-**"ANTHROPIC_API_KEY environment variable is not set"**
-- Make sure you've created `.env` file in `packages/backend/`
-- Verify the API key is correctly set in the file
+**`SERVICE_UNCONFIGURED`**
 
-**Backend not starting**
-- Check that port 3001 is not in use: `lsof -i :3001` (macOS/Linux) or `netstat -ano | findstr :3001` (Windows)
-- Verify Node.js version >= 18.0.0
+Set `OPENAI_API_KEY` in `packages/backend/.env` for local development or in the
+hosted environment variables for Render.
 
-**Type errors in shared package**
-- Run `npm install` from root to ensure all packages are linked
+**Port 3001 already in use**
+
+Stop the process using the port or change `PORT` in `packages/backend/.env`.
+
+**Physical Android device cannot reach backend**
+
+Do not point a physical Android device at `http://localhost:3001`. Use the
+Cloudflare Worker URL, Render URL, a reachable LAN IP, or an Expo tunnel.

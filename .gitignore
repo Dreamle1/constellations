@@ -27,11 +27,14 @@ yarn-error.log
 .env
 .env.local
 .env.*.local
+.dev.vars
+.dev.vars.*
 
 # Build
 .next/
 out/
 build/
+.wrangler/
 
 # Logs
 logs

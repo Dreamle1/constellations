@@ -1,120 +1,133 @@
-# Backend Setup Instructions
+# Backend Setup
 
-Your backend has been created! Follow these steps to get started:
+This repo has two backend implementations:
 
-## 1. Install Dependencies
+- `packages/worker` is the Cloudflare Workers backend intended for hosted production.
+- `packages/backend` is the Express backend kept for local development and Render fallback.
 
-```bash
-npm install
+Both expose:
+
+- `GET /health`
+- `GET /api/game/words?wordCount=5`
+
+## Install Dependencies
+
+```powershell
+npm.cmd install
 ```
 
-This installs dependencies for the entire monorepo, including the backend and shared packages.
+## Cloudflare Worker Setup
 
-## 2. Get an Anthropic API Key
+Cloudflare is the preferred hosted backend on this branch because it avoids the
+Render free-tier cold-start delay.
 
-Visit https://console.anthropic.com and create an account to get your API key.
+1. Sign in:
 
-## 3. Configure the Backend
+   ```powershell
+   npx wrangler login
+   ```
 
-```bash
-cp packages/backend/.env.example packages/backend/.env
+2. Create the D1 database:
+
+   ```powershell
+   npx wrangler d1 create constellations_words
+   ```
+
+3. Copy the returned `database_id` into `packages/worker/wrangler.jsonc`.
+
+4. Apply the schema:
+
+   ```powershell
+   npm run db:migrate:remote --workspace @constellations/worker
+   ```
+
+5. Store the OpenAI key as a Worker secret:
+
+   ```powershell
+   npx wrangler secret put OPENAI_API_KEY --cwd packages/worker
+   ```
+
+6. Deploy:
+
+   ```powershell
+   npm run worker:deploy
+   ```
+
+7. Point the Expo app at the Worker URL in the root `.env`:
+
+   ```env
+   EXPO_PUBLIC_API_URL=https://constellations-backend.<your-subdomain>.workers.dev
+   ```
+
+8. Restart Expo:
+
+   ```powershell
+   npx expo start --clear --tunnel
+   ```
+
+## Local Worker Development
+
+Run:
+
+```powershell
+npm run worker:dev
+```
+
+For local-only variables, create `packages/worker/.dev.vars`:
+
+```env
+OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_MODEL=gpt-4.1-mini
+```
+
+Do not commit `.dev.vars`.
+
+## Express Backend Fallback
+
+Copy the local env template:
+
+```powershell
+copy packages\backend\.env.example packages\backend\.env
 ```
 
 Edit `packages/backend/.env`:
-```
-ANTHROPIC_API_KEY=sk-ant-xxxx...  # Paste your Anthropic API key
+
+```env
+OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_MODEL=gpt-4.1-mini
 PORT=3001
 NODE_ENV=development
 ```
 
-## 4. Start the Backend
+Start the Express backend:
 
-```bash
+```powershell
 npm run backend:dev
 ```
 
-The server will start on `http://localhost:3001` and auto-reload on changes.
+Test it:
 
-### Test the Backend
-
-Open a new terminal and test the API:
-
-```bash
-curl "http://localhost:3001/api/game/words"
-```
-
-You should see a JSON response with 5 random words.
-
-## 5. Start Frontend + Backend Together
-
-```bash
-npm run dev:all
-```
-
-This runs both the frontend (Expo) and backend (Express) simultaneously.
-
-## Project Files Created
-
-### Backend
-- `packages/backend/src/server.ts` - Express server setup
-- `packages/backend/src/routes/game.ts` - API routes for word generation
-- `packages/backend/src/services/wordGenerationService.ts` - AI integration with Claude
-- `packages/backend/package.json` - Backend dependencies
-- `packages/backend/.env.example` - Environment template
-
-### Shared Types
-- `packages/shared/src/index.ts` - Shared TypeScript interfaces
-- Used by both frontend and backend for type safety
-
-### Frontend Integration
-- `src/utils/gameWordsApi.ts` - Client for calling the backend
-- Updated `src/types/cards.ts` to import from shared types
-- Updated `tsconfig.json` with workspace paths
-
-### Configuration
-- Updated root `package.json` with workspaces and scripts
-- `MONOREPO.md` - Complete monorepo documentation
-- `packages/backend/README.md` - Backend API documentation
-
-## Next: Update ConstellationBoard Component
-
-Update `src/components/ConstellationBoard.tsx` to use the API instead of hardcoded words:
-
-```typescript
-import { fetchGameWords } from '@/utils/gameWordsApi';
-
-// In your component:
-const [words, setWords] = useState<string[]>([]);
-const [loading, setLoading] = useState(true);
-
-useEffect(() => {
-  fetchGameWords()
-    .then(setWords)
-    .finally(() => setLoading(false));
-}, []);
-
-if (loading) {
-  return <Text>Loading game...</Text>;
-}
-
-// Use words in your game logic
+```powershell
+curl.exe --http1.1 "http://localhost:3001/api/game/words?wordCount=5"
 ```
 
 ## Troubleshooting
 
-**Cannot find module '@constellations/shared'**
-- Run `npm install` from the root directory
-- Restart your IDE's TypeScript server (Cmd+Shift+P → "TypeScript: Restart TS Server")
+**Cloudflare deploy fails because `database_id` is a placeholder**
 
-**ANTHROPIC_API_KEY not found**
-- Create `packages/backend/.env` file (copy from `.env.example`)
-- Add your API key to the file
+Run `npx wrangler d1 create constellations_words` and copy the returned ID into
+`packages/worker/wrangler.jsonc`.
+
+**Worker returns `SERVICE_UNCONFIGURED`**
+
+Set the secret with `npx wrangler secret put OPENAI_API_KEY --cwd packages/worker`.
+
+**Physical Android device cannot reach local backend**
+
+Do not use `http://localhost:3001` from a physical Android device. Point
+`EXPO_PUBLIC_API_URL` at the Worker URL, Render URL, or an accessible LAN IP.
 
 **Port 3001 already in use**
-- Kill the process: `lsof -i :3001 | grep LISTEN | awk '{print $2}' | xargs kill -9`
-- Or change `PORT` in `packages/backend/.env`
 
-## Documentation
-
-- [MONOREPO.md](./MONOREPO.md) - Monorepo structure and setup
-- [packages/backend/README.md](./packages/backend/README.md) - Backend API docs
+Either stop the process using that port or change `PORT` in
+`packages/backend/.env`.

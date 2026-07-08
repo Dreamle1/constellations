@@ -1,142 +1,114 @@
-# Monorepo Setup Guide
+# Monorepo Guide
 
-This project is organized as a monorepo with multiple packages managed via npm workspaces.
+This project is organized as an npm workspace monorepo.
 
-## Project Structure
+## Structure
 
 ```
-constellations/
-├── app/                          # Expo Router app directory
-├── src/                          # Frontend source code
-│   ├── components/
-│   ├── hooks/
-│   ├── screens/
-│   ├── types/
-│   └── utils/
-├── packages/
-│   ├── backend/                  # Node.js/Express backend server
-│   │   ├── src/
-│   │   │   ├── routes/
-│   │   │   ├── services/
-│   │   │   └── server.ts
-│   │   └── package.json
-│   └── shared/                   # Shared TypeScript types
-│       ├── src/
-│       └── package.json
-└── package.json                  # Root workspace configuration
+app/                         Expo Router app directory
+src/                         React Native frontend source
+packages/
+  backend/                   Express backend for local/Render fallback
+  worker/                    Cloudflare Workers backend for hosted production
+  shared/                    Shared TypeScript API types
+package.json                 Root workspace configuration
 ```
 
-## Initial Setup
+## Install
 
-### 1. Install Dependencies
-
-```bash
-npm install
+```powershell
+npm.cmd install
 ```
 
-This automatically installs dependencies for:
-- Root workspace
-- `packages/backend`
-- `packages/shared`
+This installs dependencies for the root app and every package under
+`packages/*`.
 
-npm workspaces handles symlink resolution automatically.
+## Packages
 
-### 2. Configure Backend
+### Frontend
 
-```bash
-cp packages/backend/.env.example packages/backend/.env
-```
+The Expo app calls the backend through `src/utils/gameWordsApi.ts` using
+`EXPO_PUBLIC_API_URL` from the root `.env`.
 
-Edit `packages/backend/.env` and add your Anthropic API key:
-```
-ANTHROPIC_API_KEY=your_api_key_here
-```
+### `packages/worker`
 
-## Running the Project
+Cloudflare Workers backend. This is the preferred hosted backend on this
+branch. It uses:
 
-### Frontend Only
-```bash
-npm start              # or npm run dev
-```
+- Worker `fetch` handler instead of Express
+- Cloudflare D1 for daily word storage
+- Cloudflare Worker secrets for `OPENAI_API_KEY`
 
-### Backend Only
-```bash
-npm run backend:dev
-```
+### `packages/backend`
 
-### Both Together (Recommended for development)
-```bash
-npm run dev:all
-```
+Express backend retained for local development and Render fallback. It uses a
+local filesystem daily-word cache unless configured otherwise.
 
-This runs:
-- Frontend on port 8081 (Expo)
-- Backend on port 3001 (Express)
+### `packages/shared`
 
-## Type Safety
-
-Both frontend and backend import types from `@constellations/shared`:
+Shared API response types imported by the frontend and backend code:
 
 ```typescript
-import type { WordCardModel, GameWordsResponse } from '@constellations/shared';
+import type { GameWordsResponse, WordCardModel } from '@constellations/shared';
 ```
-
-When you add new types to `packages/shared/src/index.ts`, they're automatically available in both projects without any build step needed.
 
 ## Scripts
 
 | Command | Description |
-|---------|-------------|
+| --- | --- |
 | `npm start` | Start Expo frontend |
-| `npm run dev` | Start Expo in dev client mode |
-| `npm run backend:dev` | Start backend in watch mode |
-| `npm run dev:all` | Run frontend and backend together |
-| `npm run type-check` | Check types in all packages |
-| `npm run lint` | Lint all TypeScript files |
-| `npm run format` | Format code with Prettier |
+| `npm run start:tunnel` | Start Expo with a tunnel |
+| `npm run backend:dev` | Start Express backend in watch mode |
+| `npm run backend:build` | Build Express backend |
+| `npm run worker:dev` | Start Cloudflare Worker locally |
+| `npm run worker:deploy` | Deploy Cloudflare Worker |
+| `npm.cmd run type-check` | Check frontend, backend, shared, and Worker TypeScript |
+| `npm test` | Run Jest tests |
 
-## Frontend-Backend Communication
+## Backend URLs
 
-The frontend calls the backend API using `fetchGameWords()` from `src/utils/gameWordsApi.ts`:
+Use the Cloudflare Worker URL for hosted app builds:
 
-```typescript
-import { fetchGameWords } from '@/utils/gameWordsApi';
-
-const words = await fetchGameWords();
+```env
+EXPO_PUBLIC_API_URL=https://constellations-backend.<your-subdomain>.workers.dev
 ```
 
-By default, it connects to `http://localhost:3001` in development.
+Render fallback:
 
-## Adding New Packages
-
-To add a new package to the monorepo:
-
-1. Create a new directory under `packages/`
-2. Add a `package.json` with a unique `name` field
-3. npm workspaces will automatically link it
-
-Example:
-```bash
-mkdir packages/utils
-# Add package.json to packages/utils/
-npm install  # This will link the new package
+```env
+EXPO_PUBLIC_API_URL=https://constellations-3ils.onrender.com
 ```
 
-## Troubleshooting
+Local Express development:
 
-**"Cannot find module '@constellations/shared'"**
-- Run `npm install` from the root directory
-- Verify the path is correct in `tsconfig.json`
+```env
+EXPO_PUBLIC_API_URL=http://localhost:3001
+```
 
-**Backend won't start**
-- Check `packages/backend/.env` exists and has `ANTHROPIC_API_KEY`
-- Ensure port 3001 is available
+Physical Android devices cannot reach the development machine's `localhost`.
+Use the Worker URL, Render URL, a reachable LAN IP, or an Expo tunnel.
 
-**Types aren't updating**
-- Backend and frontend share types in real-time
-- No build step needed for shared types (TypeScript development mode)
+## Cloudflare Setup
 
-## Next Steps
+```powershell
+npx wrangler login
+npx wrangler d1 create constellations_words
+npm run db:migrate:remote --workspace @constellations/worker
+npx wrangler secret put OPENAI_API_KEY --cwd packages/worker
+npm run worker:deploy
+```
 
-- [Backend README](./packages/backend/README.md) - API documentation and backend setup
-- Add more packages as needed (e.g., `packages/cli`, `packages/common`)
+Copy the D1 `database_id` returned by Cloudflare into
+`packages/worker/wrangler.jsonc` before migrating or deploying.
+
+## Type Safety
+
+Run:
+
+```powershell
+npm.cmd run type-check
+```
+
+The root Expo `tsconfig.json` excludes backend runtime packages so the frontend
+compiler does not need Cloudflare or Node runtime globals. Each package is
+checked by its own `tsconfig.json`.
